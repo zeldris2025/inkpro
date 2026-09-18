@@ -1,0 +1,180 @@
+{% load static humanize %}<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}InkPro — Think Ink, Think Pro{% endblock %}</title>
+<meta name="description" content="{% block description %}InkPro: banners, stickers, vehicle graphics, canvas prints and custom branded merch. Think Ink, Think Pro.{% endblock %}">
+{% if FAVICON_URL %}<link rel="icon" type="image/png" href="{{ FAVICON_URL }}">
+<link rel="apple-touch-icon" href="{{ FAVICON_URL }}">{% endif %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        'ink-yellow': '#FFD200',
+        'ink-black': '#0A0A0A',
+        'ink-cyan': '#00AEEF',
+        'ink-magenta': '#EC008C',
+      },
+      fontFamily: {
+        display: ['"Archivo Black"', 'system-ui', 'sans-serif'],
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+      },
+    },
+  },
+};
+</script>
+<link rel="stylesheet" href="{% static 'css/inkpro.css' %}">
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+{% block head_extra %}{% endblock %}
+</head>
+<body class="bg-ink-black text-white font-sans antialiased selection:bg-ink-yellow selection:text-black">
+
+<a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-4 focus:rounded focus:bg-ink-yellow focus:px-4 focus:py-2 focus:font-bold focus:text-black">Skip to content</a>
+
+{% comment %}
+Transparent at the top so the bar dissolves into the hero, then solid once the
+page scrolls. It has to become opaque: further down, the nav passes over the
+yellow CTA band and the white footer, where light-on-transparent would be
+unreadable. `scrolled` is also set on load so a deep link or a restored scroll
+position starts in the right state rather than flashing transparent.
+{% endcomment %}
+<header x-data="{ open: false, scrolled: window.scrollY > 40 }"
+        @scroll.window="scrolled = window.scrollY > 40"
+        :class="scrolled
+          ? 'border-white/10 bg-ink-black/95 shadow-lg shadow-black/50 backdrop-blur'
+          : 'border-transparent bg-transparent'"
+        class="fixed inset-x-0 top-0 z-50 border-b transition-all duration-300">
+  {% comment %}
+  Three-column grid rather than a flex row: it keeps the logo optically centred
+  in the bar no matter how much wider one side's links are than the other's.
+  Section nav sits left, account actions and the CTA sit right.
+  {% endcomment %}
+  <nav class="mx-auto grid max-w-7xl grid-cols-[auto_1fr_auto] items-center gap-4 px-4 py-3 sm:px-6 lg:grid-cols-3">
+
+    {# Left — section navigation #}
+    <div class="hidden items-center gap-1 justify-self-start lg:flex">
+      <a href="{% url 'services' %}" class="rounded-full px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10 hover:text-white">Services</a>
+      <a href="{% url 'gallery' %}" class="rounded-full px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10 hover:text-white">Gallery</a>
+      <a href="{% url 'about' %}" class="rounded-full px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10 hover:text-white">About</a>
+      <a href="{% url 'contact' %}" class="rounded-full px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10 hover:text-white">Contact</a>
+    </div>
+
+    {# Mobile — the hamburger takes the left cell so the logo stays centred #}
+    <button @click="open = !open" class="rounded-lg p-2 text-white justify-self-start lg:hidden" aria-label="Toggle menu">
+      <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path x-show="!open" stroke-linecap="round" d="M4 6h16M4 12h16M4 18h16"/><path x-show="open" x-cloak stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+
+    {# Centre — the mark #}
+    <a href="{% url 'home' %}" class="group justify-self-center" aria-label="InkPro — {{ TAGLINE }}">
+      {% if LOGO_URL %}
+        {% comment %}Dark-background artwork: yellow splat and tagline, so the
+        whole mark reads over the hero. Colours are the artwork's own.{% endcomment %}
+        <img src="{{ LOGO_URL }}" alt="InkPro" class="h-14 w-auto transition group-hover:scale-105 sm:h-[4.75rem]">
+      {% else %}
+        <span class="font-display text-2xl tracking-tight text-ink-yellow">InkPro</span>
+      {% endif %}
+    </a>
+
+    {# Right — account actions and the primary CTA #}
+    <div class="hidden items-center gap-1 justify-self-end lg:flex">
+      {% if user.is_authenticated %}
+        <a href="{% url 'my_quotes' %}" class="rounded-full px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10 hover:text-white">My quotes</a>
+        {% if is_inkpro_staff %}<a href="{% url 'staff_dashboard' %}" class="rounded-full px-4 py-2 text-sm font-semibold text-ink-cyan transition hover:bg-white/10">Staff</a>{% endif %}
+        <form method="post" action="{% url 'logout' %}" class="inline">{% csrf_token %}
+          <button class="rounded-full px-4 py-2 text-sm font-semibold text-white/50 transition hover:text-white">Sign out</button>
+        </form>
+      {% else %}
+        <a href="{% url 'login' %}" class="rounded-full px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10 hover:text-white">Sign in</a>
+      {% endif %}
+      <a href="{% url 'quote_builder' %}" class="ink-btn ml-2">Get a quote</a>
+    </div>
+
+    {# Mobile — right cell keeps the grid symmetrical so the logo is truly centred #}
+    <span class="w-10 justify-self-end lg:hidden" aria-hidden="true"></span>
+  </nav>
+
+  <div x-show="open" x-cloak x-transition class="border-t border-white/10 bg-ink-black/98 px-4 pb-6 pt-2 backdrop-blur lg:hidden">
+    <a href="{% url 'services' %}" class="block rounded-lg px-4 py-3 font-semibold text-white/80 hover:bg-white/5">Services</a>
+    <a href="{% url 'gallery' %}" class="block rounded-lg px-4 py-3 font-semibold text-white/80 hover:bg-white/5">Gallery</a>
+    <a href="{% url 'about' %}" class="block rounded-lg px-4 py-3 font-semibold text-white/80 hover:bg-white/5">About</a>
+    <a href="{% url 'contact' %}" class="block rounded-lg px-4 py-3 font-semibold text-white/80 hover:bg-white/5">Contact</a>
+    {% if user.is_authenticated %}
+      <a href="{% url 'my_quotes' %}" class="block rounded-lg px-4 py-3 font-semibold text-white/80 hover:bg-white/5">My quotes</a>
+      {% if is_inkpro_staff %}<a href="{% url 'staff_dashboard' %}" class="block rounded-lg px-4 py-3 font-semibold text-ink-cyan hover:bg-white/5">Staff portal</a>{% endif %}
+      <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="block w-full rounded-lg px-4 py-3 text-left font-semibold text-white/60 hover:bg-white/5">Sign out</button></form>
+    {% else %}
+      <a href="{% url 'login' %}" class="block rounded-lg px-4 py-3 font-semibold text-white/80 hover:bg-white/5">Sign in</a>
+    {% endif %}
+    <a href="{% url 'quote_builder' %}" class="ink-btn mt-3 w-full justify-center">Get a quote</a>
+  </div>
+</header>
+
+{% if messages %}
+<div class="fixed inset-x-0 top-20 z-50 mx-auto max-w-2xl space-y-2 px-4">
+  {% for message in messages %}
+  <div x-data="{ show: true }" x-show="show" x-transition x-init="setTimeout(() => show = false, 6000)"
+       class="flex items-start gap-3 rounded-xl border px-4 py-3 text-sm font-medium shadow-2xl backdrop-blur
+       {% if message.tags == 'error' %}border-red-400/40 bg-red-950/90 text-red-100
+       {% elif message.tags == 'warning' %}border-amber-400/40 bg-amber-950/90 text-amber-100
+       {% else %}border-ink-yellow/40 bg-zinc-900/95 text-white{% endif %}">
+    <span class="flex-1">{{ message }}</span>
+    <button @click="show = false" class="text-white/50 hover:text-white" aria-label="Dismiss">&times;</button>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<main id="main">{% block content %}{% endblock %}</main>
+
+{% block footer %}
+<footer class="relative z-10 border-t border-zinc-200 bg-white text-zinc-700">
+  <div class="mx-auto grid max-w-7xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-4">
+    <div class="md:col-span-2">
+      {% if LOGO_ON_LIGHT_URL %}
+        {# Original-colour artwork: the on-dark variant is white and would be invisible here. #}
+        <img src="{{ LOGO_ON_LIGHT_URL }}" alt="InkPro — {{ TAGLINE }}" class="h-20 w-auto">
+      {% else %}
+        <div class="font-display text-3xl text-zinc-900">InkPro</div>
+        <p class="mt-2 text-sm font-semibold uppercase tracking-[0.3em] text-zinc-500">{{ TAGLINE }}</p>
+      {% endif %}
+      <p class="mt-4 max-w-sm text-sm leading-relaxed text-zinc-600">Banners, stickers, vehicle graphics, canvas prints and custom branded merch — printed properly, turned around fast.</p>
+      <a href="{% url 'quote_builder' %}" class="ink-btn mt-6">Start a quote</a>
+    </div>
+    <div>
+      <h3 class="text-xs font-bold uppercase tracking-widest text-zinc-400">Services</h3>
+      <ul class="mt-4 space-y-2 text-sm">
+        {% for category in nav_categories %}
+        {# Hover goes dark, not yellow: #FFD200 on white is ~1.3:1 and unreadable. #}
+        <li><a href="{{ category.get_absolute_url }}" class="text-zinc-600 transition hover:text-zinc-900">{{ category.name }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h3 class="text-xs font-bold uppercase tracking-widest text-zinc-400">Company</h3>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li><a href="{% url 'about' %}" class="text-zinc-600 transition hover:text-zinc-900">About</a></li>
+        <li><a href="{% url 'gallery' %}" class="text-zinc-600 transition hover:text-zinc-900">Gallery</a></li>
+        <li><a href="{% url 'contact' %}" class="text-zinc-600 transition hover:text-zinc-900">Contact</a></li>
+        <li><a href="{% url 'login' %}" class="text-zinc-600 transition hover:text-zinc-900">Customer login</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="border-t border-zinc-200 px-4 py-6 text-center text-xs text-zinc-500">
+    &copy; {% now "Y" %} InkPro. All prices are in Samoan Tala ({{ CURRENCY_CODE }}) and exclude GST unless stated. GST charged at {{ GST_RATE_PCT }}%.
+  </div>
+</footer>
+{% endblock %}
+
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+<script src="{% static 'js/inkpro.js' %}" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}{% block staff_title %}Staff{% endblock %} — InkPro{% endblock %}
+{% block content %}
+<div class="min-h-screen bg-zinc-950 pt-28">
+  <div class="border-b border-white/10 bg-black">
+    <div class="mx-auto flex max-w-[1600px] flex-wrap items-center gap-1 px-4 py-3 sm:px-6">
+      <span class="mr-4 font-display text-sm uppercase tracking-widest text-ink-yellow">Staff portal</span>
+      {% url 'staff_dashboard' as u_dash %}{% url 'staff_quote_inbox' as u_inbox %}{% url 'staff_register' as u_reg %}
+      <a href="{{ u_dash }}" class="rounded-full px-4 py-1.5 text-sm font-semibold transition {% if request.path == u_dash %}bg-ink-yellow text-black{% else %}text-white/60 hover:bg-white/10 hover:text-white{% endif %}">Dashboard</a>
+      <a href="{{ u_inbox }}" class="rounded-full px-4 py-1.5 text-sm font-semibold transition {% if '/staff/quotes' in request.path %}bg-ink-yellow text-black{% else %}text-white/60 hover:bg-white/10 hover:text-white{% endif %}">Quotes</a>
+      <a href="{{ u_reg }}" class="rounded-full px-4 py-1.5 text-sm font-semibold transition {% if '/staff/register' in request.path %}bg-ink-yellow text-black{% else %}text-white/60 hover:bg-white/10 hover:text-white{% endif %}">Register</a>
+      <a href="/admin/" class="ml-auto rounded-full px-4 py-1.5 text-sm font-semibold text-white/40 transition hover:text-white">Django admin ↗</a>
+    </div>
+  </div>
+
+  <div class="mx-auto max-w-[1600px] px-4 py-8 sm:px-6">{% block staff_content %}{% endblock %}</div>
+</div>
+{% endblock %}
+{% block footer %}{% endblock %}

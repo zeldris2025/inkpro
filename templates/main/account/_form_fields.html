@@ -1,0 +1,14 @@
+{% comment %}Renders a form's fields with the site's label/error treatment.{% endcomment %}
+{% if form.non_field_errors %}
+<div class="mb-5 rounded-lg border border-red-400/40 bg-red-950/40 p-3 text-sm text-red-200">
+  {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+</div>
+{% endif %}
+{% for field in form %}
+<div class="mb-5">
+  <label for="{{ field.id_for_label }}" class="mb-2 block text-xs font-bold uppercase tracking-widest text-white/50">{{ field.label }}</label>
+  {{ field }}
+  {% if field.help_text %}<div class="mt-1.5 text-xs leading-relaxed text-white/35">{{ field.help_text|safe }}</div>{% endif %}
+  {% for error in field.errors %}<p class="mt-1.5 text-xs font-semibold text-red-400">{{ error }}</p>{% endfor %}
+</div>
+{% endfor %}

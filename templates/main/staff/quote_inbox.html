@@ -1,0 +1,80 @@
+{% extends "main/staff/base_staff.html" %}{% load humanize %}
+{% block staff_title %}Quotes{% endblock %}
+{% block staff_content %}
+<div class="flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-3xl">Quote inbox</h1>
+    <p class="mt-1 text-sm text-white/45">Review, price and send. Submitted quotes move to In review as soon as you save an edit.</p>
+  </div>
+  <div class="flex rounded-full border border-white/15 p-1">
+    <a href="?view=board{% if status %}&status={{ status }}{% endif %}" class="rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest transition {% if view_mode == 'board' %}bg-ink-yellow text-black{% else %}text-white/50 hover:text-white{% endif %}">Board</a>
+    <a href="?view=table{% if status %}&status={{ status }}{% endif %}" class="rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest transition {% if view_mode == 'table' %}bg-ink-yellow text-black{% else %}text-white/50 hover:text-white{% endif %}">Table</a>
+  </div>
+</div>
+
+<form method="get" class="mt-6 flex flex-wrap gap-3">
+  <input type="hidden" name="view" value="{{ view_mode }}">
+  <input type="search" name="q" value="{{ search }}" placeholder="Search number, name or email…"
+         class="min-w-[240px] flex-1 rounded-lg border border-white/15 bg-black px-4 py-2.5 text-sm text-white placeholder-white/35 focus:border-ink-yellow focus:outline-none">
+  <select name="status" class="rounded-lg border border-white/15 bg-black px-4 py-2.5 text-sm text-white focus:border-ink-yellow focus:outline-none">
+    <option value="">All statuses</option>
+    {% for value, label in statuses %}<option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <button type="submit" class="ink-btn">Filter</button>
+</form>
+
+{% if view_mode == 'board' %}
+<div class="mt-8 grid gap-5 lg:grid-cols-4">
+  {% for column_status, quotes_in_column in board.items %}
+  <div class="rounded-xl border border-white/10 bg-white/5 p-4">
+    <div class="mb-4 flex items-center justify-between">
+      <h2 class="text-xs font-bold uppercase tracking-widest text-white/50">
+        {% if column_status == 'SUBMITTED' %}Submitted{% elif column_status == 'IN_REVIEW' %}In review{% elif column_status == 'APPROVED' %}Approved{% else %}Sent{% endif %}
+      </h2>
+      <span class="rounded-full bg-white/10 px-2 py-0.5 text-xs font-bold">{{ quotes_in_column|length }}</span>
+    </div>
+    <div class="space-y-3">
+      {% for quote in quotes_in_column %}
+      <a href="{% url 'staff_quote_detail' quote.pk %}" class="block rounded-lg border border-white/10 bg-black/40 p-4 transition hover:border-ink-yellow/60 hover:bg-black/70">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-bold text-ink-yellow">{{ quote.quote_number }}</span>
+          {% if quote.is_urgent %}<span class="rounded bg-ink-magenta/25 px-1.5 py-0.5 text-[10px] font-bold uppercase text-ink-magenta">Rush</span>{% endif %}
+        </div>
+        <div class="mt-1 truncate text-sm text-white/65">{{ quote.contact_name|default:"Guest" }}</div>
+        <div class="mt-3 flex items-center justify-between text-xs">
+          <span class="text-white/35">{{ quote.created_at|timesince }} ago</span>
+          <span class="font-bold tabular">${{ quote.total|floatformat:2|intcomma }}</span>
+        </div>
+      </a>
+      {% empty %}<p class="py-8 text-center text-xs text-white/30">Empty</p>{% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="mt-8 overflow-x-auto rounded-xl border border-white/10">
+  <table class="w-full text-left text-sm">
+    <thead class="bg-white/5 text-xs uppercase tracking-wider text-white/45">
+      <tr>
+        <th class="px-4 py-3">Quote</th><th class="px-4 py-3">Customer</th><th class="px-4 py-3">Status</th>
+        <th class="px-4 py-3">Created</th><th class="px-4 py-3">Reviewer</th><th class="px-4 py-3 text-right">Total</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-white/5">
+      {% for quote in quotes %}
+      <tr class="transition hover:bg-white/5">
+        <td class="px-4 py-3"><a href="{% url 'staff_quote_detail' quote.pk %}" class="font-bold text-ink-yellow hover:underline">{{ quote.quote_number }}</a>
+          {% if quote.is_urgent %}<span class="ml-2 rounded bg-ink-magenta/25 px-1.5 py-0.5 text-[10px] font-bold uppercase text-ink-magenta">Rush</span>{% endif %}</td>
+        <td class="px-4 py-3">{{ quote.contact_name|default:"—" }}<div class="text-xs text-white/35">{{ quote.contact_email }}</div></td>
+        <td class="px-4 py-3"><span class="rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-wider">{{ quote.get_status_display }}</span></td>
+        <td class="px-4 py-3 text-white/50">{{ quote.created_at|date:"j M Y" }}</td>
+        <td class="px-4 py-3 text-white/50">{{ quote.reviewed_by.username|default:"—" }}</td>
+        <td class="px-4 py-3 text-right font-bold tabular">${{ quote.total|floatformat:2|intcomma }}</td>
+      </tr>
+      {% empty %}<tr><td colspan="6" class="px-4 py-12 text-center text-white/40">No quotes match those filters.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

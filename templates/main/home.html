@@ -1,0 +1,241 @@
+{% extends "base.html" %}{% load humanize static %}
+{% block content %}
+
+{% if ENABLE_3D_HERO %}{% comment %}
+Scroll-driven WebGL layer. Fixed behind the page content (z-0; sections sit at
+z-10), so one persistent scene carries through every section rather than
+re-mounting per block. The Three.js bundle is dynamically imported after first
+paint and only on capable devices — see the loader at the foot of this file.
+The <noscript>-style fallback below is what everyone else sees.
+{% endcomment %}
+<div id="ink3d-layer" class="pointer-events-none fixed inset-0 z-0"
+     data-module-url="{% static 'js/inkpro3d.js' %}"
+     data-logo-url="{% static 'img/inkpro-logo-on-dark.png' %}"
+     aria-hidden="true">
+  <canvas id="ink3d-canvas" class="h-full w-full opacity-0 transition-opacity duration-700"></canvas>
+  <div id="ink3d-fallback" class="absolute inset-0 overflow-hidden">
+    <img src="{% static 'img/press-fallback.svg' %}" alt=""
+         data-parallax="0.35"
+         class="absolute left-1/2 top-1/2 w-[min(760px,92vw)] -translate-x-1/2 -translate-y-1/2 opacity-[0.18]">
+  </div>
+</div>
+{% endif %}
+
+<!-- Hero -->
+<section data-hero data-scene="press" class="relative z-10 flex min-h-screen items-center overflow-hidden ink-grid pt-28">
+  <div class="pointer-events-none absolute inset-0">
+    <div data-hero-blob data-parallax="0.5" class="absolute -left-24 top-24 h-80 w-80 rounded-full bg-ink-cyan/20 blur-3xl"></div>
+    <div data-hero-blob data-parallax="0.8" class="absolute right-0 top-1/3 h-96 w-96 rounded-full bg-ink-magenta/20 blur-3xl"></div>
+    <div data-hero-blob data-parallax="0.3" class="absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-ink-yellow/20 blur-3xl"></div>
+    <div class="absolute inset-0 halftone opacity-40"></div>
+  </div>
+
+  <div class="relative mx-auto w-full max-w-7xl px-4 py-20 sm:px-6">
+    <div class="grid items-center gap-12 lg:grid-cols-2">
+      <div>
+        <div data-hero-fade class="mb-6 inline-flex items-center gap-2 rounded-full border border-ink-yellow/30 bg-ink-yellow/10 px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-ink-yellow">
+          <span class="relative flex h-2 w-2"><span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-ink-yellow opacity-75"></span><span class="relative inline-flex h-2 w-2 rounded-full bg-ink-yellow"></span></span>
+          Same-day printing available
+        </div>
+
+        <h1 class="font-display text-5xl leading-[0.95] tracking-tight sm:text-7xl xl:text-8xl">
+          <span class="block overflow-hidden"><span data-hero-line class="block">THINK INK.</span></span>
+          <span class="block overflow-hidden"><span data-hero-line class="block text-ink-yellow">THINK PRO.</span></span>
+        </h1>
+
+        {% if LAUNCH_PROMO_ENABLED %}
+        <div data-hero-fade class="mt-7 max-w-lg rounded-xl">
+          {% include "main/partials/_marquee.html" %}
+        </div>
+        {% endif %}
+
+        <p data-hero-fade class="mt-7 max-w-lg text-lg leading-relaxed text-white/70">
+          Banners, stickers, vehicle graphics, canvas prints and custom branded merch.
+          Priced up front, printed properly, turned around fast.
+        </p>
+
+        <div data-hero-fade class="mt-9 flex flex-wrap items-center gap-4">
+          <a href="{% url 'quote_builder' %}" class="ink-btn text-base">
+            Build your quote
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5-5 5M6 12h12"/></svg>
+          </a>
+          <a href="{% url 'services' %}" class="ink-btn-ghost">See what we print</a>
+        </div>
+
+        <p data-hero-fade class="mt-6 text-sm text-white/40">Instant pricing from our live rate card — no waiting on a callback.</p>
+      </div>
+
+      <!-- Floating product tiles -->
+      <div data-hero-fade class="relative hidden lg:block">
+        <div class="grid grid-cols-2 gap-4">
+          {% for category in categories|slice:":4" %}
+          <a href="{{ category.get_absolute_url }}" data-parallax="{{ forloop.counter0|add:2 }}"
+             class="ink-card group relative flex aspect-square flex-col justify-end overflow-hidden p-6 {% cycle '' 'mt-8' %}">
+            {% if category.card_image %}
+            <img src="{{ category.card_image.url }}" alt="" loading="lazy"
+                 class="absolute inset-0 h-full w-full object-cover opacity-85 transition duration-500 group-hover:scale-105 group-hover:opacity-100">
+            {# Scrim only where the label sits, so the photo stays bright but the text keeps contrast. #}
+            <div class="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-black/5"></div>
+            {% endif %}
+            <div class="relative">
+              <div class="font-display text-lg leading-tight">{{ category.name }}</div>
+              {% if category.price_from %}<div class="mt-1 text-sm font-semibold text-ink-yellow tabular">from ${{ category.price_from|floatformat:0|intcomma }}</div>{% endif %}
+            </div>
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="absolute inset-x-0 bottom-8 flex justify-center">
+    <svg class="h-6 w-6 animate-bounce text-white/30" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+  </div>
+</section>
+
+<!-- Stats -->
+<section class="relative z-10 border-y border-white/10 bg-white/[0.03]">
+  <div data-reveal-group class="mx-auto grid max-w-7xl grid-cols-2 gap-8 px-4 py-16 sm:px-6 lg:grid-cols-4">
+    <div class="reveal text-center">
+      <div class="font-display text-4xl text-ink-yellow tabular sm:text-5xl" data-count-to="{{ stats.jobs }}" data-count-suffix="+">0</div>
+      <div class="mt-2 text-xs font-bold uppercase tracking-widest text-white/50">Jobs completed</div>
+    </div>
+    <div class="reveal text-center">
+      <div class="font-display text-4xl text-ink-yellow tabular sm:text-5xl" data-count-to="{{ stats.clients }}" data-count-suffix="+">0</div>
+      <div class="mt-2 text-xs font-bold uppercase tracking-widest text-white/50">Clients served</div>
+    </div>
+    <div class="reveal text-center">
+      <div class="font-display text-4xl text-ink-yellow tabular sm:text-5xl" data-count-to="{{ stats.categories }}">0</div>
+      <div class="mt-2 text-xs font-bold uppercase tracking-widest text-white/50">Print services</div>
+    </div>
+    <div class="reveal text-center">
+      <div class="font-display text-4xl text-ink-yellow tabular sm:text-5xl" data-count-to="{{ stats.years }}">0</div>
+      <div class="mt-2 text-xs font-bold uppercase tracking-widest text-white/50">Years in print</div>
+    </div>
+  </div>
+</section>
+
+<!-- Services -->
+<section data-scene="sheet" class="relative z-10 py-24">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6">
+    <div class="reveal max-w-2xl">
+      <span class="text-xs font-bold uppercase tracking-[0.3em] text-ink-yellow">What we print</span>
+      <h2 class="mt-4 font-display text-4xl leading-tight sm:text-5xl">Everything from a single tee<br>to a full fleet wrap.</h2>
+      <p class="mt-5 text-white/60">Live pricing straight from our rate card. Pick a service, size it, and see the number before you commit.</p>
+    </div>
+
+    <div data-reveal-group class="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      {% for category in categories %}
+      <a href="{{ category.get_absolute_url }}" class="ink-card reveal group flex flex-col overflow-hidden">
+        {% if category.card_image %}
+        <div class="aspect-[4/3] overflow-hidden bg-white/5">
+          <img src="{{ category.card_image.url }}" alt="{{ category.name }}" loading="lazy"
+               class="h-full w-full object-cover transition duration-500 group-hover:scale-105">
+        </div>
+        {% endif %}
+        <div class="flex flex-1 flex-col p-7">
+        <h3 class="font-display text-xl leading-tight">{{ category.name }}</h3>
+        <p class="mt-3 flex-1 text-sm leading-relaxed text-white/55">{{ category.description|truncatewords:22 }}</p>
+        <div class="mt-6 flex items-center justify-between border-t border-white/10 pt-4">
+          {% if category.price_from %}
+          <span class="text-sm font-bold text-ink-yellow tabular">From ${{ category.price_from|floatformat:2|intcomma }}</span>
+          {% else %}<span class="text-sm text-white/40">Priced on request</span>{% endif %}
+          <span class="text-sm font-bold text-white/40 transition group-hover:translate-x-1 group-hover:text-ink-yellow">→</span>
+        </div>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+
+    <div class="reveal mt-12 text-center">
+      <a href="{% url 'services' %}" class="ink-btn-ghost">View the full rate card</a>
+    </div>
+  </div>
+</section>
+
+<!-- Process -->
+<section data-scene="cmyk" class="relative z-10 border-y border-white/10 bg-gradient-to-b from-white/[0.03] to-transparent py-24">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6">
+    <h2 class="reveal text-center font-display text-4xl sm:text-5xl">Three steps to printed.</h2>
+    <div data-reveal-group class="mt-16 grid gap-8 md:grid-cols-3">
+      <div class="reveal relative">
+        <div class="font-display text-7xl text-white/10">01</div>
+        <h3 class="-mt-6 font-display text-2xl text-ink-yellow">Configure</h3>
+        <p class="mt-3 text-white/60">Pick your service and size in the quote builder. The price updates live as you go.</p>
+      </div>
+      <div class="reveal relative">
+        <div class="font-display text-7xl text-white/10">02</div>
+        <h3 class="-mt-6 font-display text-2xl text-ink-yellow">We review</h3>
+        <p class="mt-3 text-white/60">Our team checks your artwork and sizing, then sends a firm quote to your inbox.</p>
+      </div>
+      <div class="reveal relative">
+        <div class="font-display text-7xl text-white/10">03</div>
+        <h3 class="-mt-6 font-display text-2xl text-ink-yellow">Accept & print</h3>
+        <p class="mt-3 text-white/60">One click to accept. We get straight on the press and let you know when it's ready.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Testimonials -->
+<section data-scene="showcase" class="relative z-10 py-24" x-data="{ active: 0, items: [
+  { quote: 'Turned our whole club kit around in four days — names, numbers, the lot. Looked sharp on the field.', name: 'Kaiwaka Rugby Club', role: 'Teamwear' },
+  { quote: 'The van decals still look brand new two winters later. Straight, tidy, no bubbles.', name: 'Te Awa Motors', role: 'Fleet graphics' },
+  { quote: 'Needed 150 badges by the next morning. They said yes and they delivered.', name: 'Whangarei Funeral Home', role: 'Same-day badges' }
+] }">
+  <div class="mx-auto max-w-4xl px-4 text-center sm:px-6">
+    <span class="reveal text-xs font-bold uppercase tracking-[0.3em] text-ink-yellow">What clients say</span>
+    <div class="reveal relative mt-10 min-h-[190px]">
+      <template x-for="(item, index) in items" :key="index">
+        <div x-show="active === index" x-transition:enter="transition ease-out duration-500"
+             x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0">
+          <p class="font-display text-2xl leading-snug sm:text-3xl" x-text="'“' + item.quote + '”'"></p>
+          <div class="mt-6 text-sm font-bold text-ink-yellow" x-text="item.name"></div>
+          <div class="text-xs uppercase tracking-widest text-white/40" x-text="item.role"></div>
+        </div>
+      </template>
+    </div>
+    <div class="reveal mt-8 flex justify-center gap-3">
+      <template x-for="(item, index) in items" :key="index">
+        <button @click="active = index" :aria-label="'Testimonial ' + (index + 1)"
+                :class="active === index ? 'w-8 bg-ink-yellow' : 'w-2 bg-white/25 hover:bg-white/50'"
+                class="step-dot h-2 rounded-full"></button>
+      </template>
+    </div>
+  </div>
+</section>
+
+{% if ENABLE_3D_HERO %}
+{% comment %}This section exists purely to stage the WebGL finale; without it
+there is nothing to look at, so it is gated alongside the layer.{% endcomment %}
+<!-- Stamp (3D finale) -->
+<section data-scene="stamp" class="relative z-10 flex min-h-screen items-center justify-center overflow-hidden">
+  <div class="reveal px-4 text-center sm:px-6">
+    <span class="text-xs font-bold uppercase tracking-[0.3em] text-ink-yellow">Pressed &amp; ready</span>
+    <h2 class="mt-5 font-display text-4xl leading-none sm:text-6xl">Straight off<br>the press.</h2>
+  </div>
+</section>
+{% endif %}
+
+<!-- CTA -->
+<section class="relative z-10 overflow-hidden border-t border-white/10 bg-ink-yellow py-24 text-black">
+  <div class="absolute inset-0 opacity-20" style="background-image: radial-gradient(#000 1.5px, transparent 1.5px); background-size: 18px 18px;"></div>
+  <div class="reveal relative mx-auto max-w-3xl px-4 text-center sm:px-6">
+    <h2 class="font-display text-4xl leading-tight sm:text-6xl">Ready to get it printed?</h2>
+    <p class="mx-auto mt-5 max-w-xl text-lg font-medium text-black/70">Build a quote in under two minutes. No account needed, no obligation.</p>
+    <a href="{% url 'quote_builder' %}" class="mt-9 inline-flex items-center gap-2 rounded-full bg-black px-8 py-4 font-display text-lg text-ink-yellow transition hover:-translate-y-1 hover:shadow-2xl">
+      Start your quote →
+    </a>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+{% if ENABLE_3D_HERO %}
+{% comment %}Capability gate for the WebGL layer. Tiny; the Three.js bundle it
+may pull in is dynamically imported only after load + idle, so first paint of
+the hero and its quote CTA is never blocked.{% endcomment %}
+<script src="{% static 'js/inkpro3d-loader.js' %}" defer></script>
+{% endif %}
+{% endblock %}

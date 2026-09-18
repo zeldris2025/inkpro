@@ -1,0 +1,27 @@
+{% comment %}
+Launch promotion marquee.
+
+Pure CSS: the track holds the message twice and slides exactly -50%, so the
+second copy lands where the first began and the loop is seamless with no JS
+and no reflow — it animates `transform` only.
+
+Accessibility: the moving copies are hidden from assistive tech, which would
+otherwise read the message twice in a jumble, and a single static copy is
+exposed to screen readers instead. The animation pauses on hover and stops
+entirely under `prefers-reduced-motion`.
+{% endcomment %}
+<div class="ink-marquee" role="region" aria-label="Launch promotion">
+  <span class="sr-only">{{ LAUNCH_PROMO_TEXT }}</span>
+  <div class="ink-marquee__track" aria-hidden="true">
+    {% for _ in "12" %}
+      {% for __ in "123" %}
+        <span class="ink-marquee__item">{{ LAUNCH_PROMO_TEXT }}</span>
+        <span class="ink-marquee__sep" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor" class="h-3 w-3">
+            <path d="M12 0l2.4 7.2L21.6 4.8l-4.8 5.4 6 3.6-7.2.6 2.4 7.2-6-4.8-6 4.8 2.4-7.2-7.2-.6 6-3.6L2.4 4.8l7.2 2.4z"/>
+          </svg>
+        </span>
+      {% endfor %}
+    {% endfor %}
+  </div>
+</div>

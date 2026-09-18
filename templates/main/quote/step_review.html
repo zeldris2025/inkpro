@@ -1,0 +1,83 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}Your details — InkPro{% endblock %}
+{% block content %}
+<section class="relative overflow-hidden ink-grid pb-24 pt-32">
+  <div class="absolute inset-0 halftone opacity-20"></div>
+  <div class="relative mx-auto max-w-7xl px-4 sm:px-6">
+    {% include "main/quote/_progress.html" with step=3 %}
+
+    <div class="grid gap-8 lg:grid-cols-3">
+      <div class="lg:col-span-2">
+        <h1 class="font-display text-4xl leading-tight sm:text-5xl">Where do we send it?</h1>
+        {% if user.is_authenticated %}
+        <div class="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-ink-yellow/25 bg-ink-yellow/5 px-4 py-3 text-sm">
+          <svg class="h-5 w-5 shrink-0 text-ink-yellow" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M12 21a9 9 0 110-18 9 9 0 010 18z"/>
+          </svg>
+          <span class="text-white/75">
+            Filled in from your account{% if user.email %} (<strong class="text-white">{{ user.email }}</strong>){% endif %} — edit anything that's changed.
+          </span>
+          <a href="{% url 'profile' %}" class="ml-auto whitespace-nowrap text-xs font-bold uppercase tracking-widest text-ink-yellow hover:underline">Update profile</a>
+        </div>
+        {% else %}
+        <p class="mt-3 text-white/60">
+          No account needed. <a href="{% url 'login' %}" class="font-bold text-ink-yellow underline underline-offset-4">Sign in</a> if you'd like to track this quote.
+        </p>
+        {% endif %}
+
+        <form method="post" class="mt-8 space-y-6" x-data="{ urgent: {{ quote.is_urgent|yesno:'true,false' }} }">
+          {% csrf_token %}
+          <div class="grid gap-5 sm:grid-cols-2">
+            <div>
+              <label for="{{ form.guest_name.id_for_label }}" class="mb-2 block text-xs font-bold uppercase tracking-widest text-white/50">{{ form.guest_name.label }} *</label>
+              {{ form.guest_name }}
+              {% for error in form.guest_name.errors %}<p class="mt-1 text-xs font-semibold text-red-400">{{ error }}</p>{% endfor %}
+            </div>
+            <div>
+              <label for="{{ form.guest_email.id_for_label }}" class="mb-2 block text-xs font-bold uppercase tracking-widest text-white/50">{{ form.guest_email.label }} *</label>
+              {{ form.guest_email }}
+              {% for error in form.guest_email.errors %}<p class="mt-1 text-xs font-semibold text-red-400">{{ error }}</p>{% endfor %}
+            </div>
+          </div>
+
+          <div>
+            <label for="{{ form.guest_phone.id_for_label }}" class="mb-2 block text-xs font-bold uppercase tracking-widest text-white/50">{{ form.guest_phone.label }}</label>
+            {{ form.guest_phone }}
+          </div>
+
+          <div>
+            <label for="{{ form.customer_notes.id_for_label }}" class="mb-2 block text-xs font-bold uppercase tracking-widest text-white/50">{{ form.customer_notes.label }}</label>
+            {{ form.customer_notes }}
+          </div>
+
+          <!-- Urgency toggle: posts to HTMX so the sidebar total updates immediately. -->
+          <label class="flex cursor-pointer items-start gap-4 rounded-xl border border-white/10 bg-white/5 p-5 transition hover:border-ink-magenta/50"
+                 :class="urgent && 'border-ink-magenta/60 bg-ink-magenta/10'">
+            <input type="checkbox" name="{{ form.is_urgent.html_name }}" id="{{ form.is_urgent.id_for_label }}"
+                   x-model="urgent" {% if quote.is_urgent %}checked{% endif %}
+                   hx-post="{% url 'quote_toggle_urgent' %}" hx-target="#quote-summary" hx-swap="innerHTML"
+                   hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                   hx-vals='js:{is_urgent: event.target.checked}'
+                   class="mt-0.5 h-5 w-5 rounded accent-ink-magenta">
+            <span>
+              <span class="block font-bold">I need this urgently</span>
+              <span class="mt-1 block text-sm text-white/55">
+                Same-day and rush jobs carry a
+                {% if urgent_fee_band %}${{ urgent_fee_band.min_amount|floatformat:0 }}–${{ urgent_fee_band.max_amount|floatformat:0 }}{% else %}$50–$100{% endif %}
+                urgency fee. We'll confirm the exact amount with your quote.
+              </span>
+            </span>
+          </label>
+
+          <button type="submit" class="ink-btn w-full justify-center text-base">Submit quote request →</button>
+          <p class="text-center text-xs text-white/40">Submitting doesn't commit you to anything. We'll review and email a firm quote.</p>
+        </form>
+      </div>
+
+      <aside class="lg:col-span-1">
+        <div id="quote-summary" class="sticky top-24">{% include "main/quote/_summary.html" with on_review_step=True %}</div>
+      </aside>
+    </div>
+  </div>
+</section>
+{% endblock %}

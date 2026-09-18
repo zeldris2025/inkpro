@@ -1,0 +1,40 @@
+{% comment %}
+Shared image lightbox overlay.
+
+The including element supplies the Alpine state:
+
+    x-data="{ open: false, current: null }"
+
+and each trigger sets `current` to { src, caption, category } before flipping
+`open`. Kept as one partial because three pages (services, service detail and
+the gallery) need identical behaviour.
+
+Closes on Escape, on backdrop click, and on the close button. Page scrolling is
+locked while it is open so the background does not drift behind the image.
+{% endcomment %}
+<div x-show="open" x-cloak
+     x-transition.opacity.duration.200ms
+     x-effect="document.body.style.overflow = open ? 'hidden' : ''"
+     @keydown.escape.window="open = false"
+     @click="open = false"
+     role="dialog" aria-modal="true" aria-label="Image preview"
+     class="fixed inset-0 z-[100] flex items-center justify-center bg-black/92 p-4 backdrop-blur-sm sm:p-8">
+
+  <template x-if="current">
+    <figure class="max-w-6xl" @click.stop>
+      <img :src="current.src" :alt="current.caption"
+           class="mx-auto max-h-[76vh] w-auto rounded-xl object-contain shadow-2xl shadow-black/80">
+      <figcaption class="mt-5 text-center">
+        <span x-show="current.category" x-cloak
+              class="block text-xs font-bold uppercase tracking-widest text-ink-yellow"
+              x-text="current.category"></span>
+        <span class="mt-1 block text-sm text-white/70" x-text="current.caption"></span>
+      </figcaption>
+    </figure>
+  </template>
+
+  <button @click="open = false" aria-label="Close preview"
+          class="absolute right-4 top-4 flex h-11 w-11 items-center justify-center rounded-full border border-white/20 text-2xl leading-none text-white/70 transition hover:border-white/50 hover:text-white sm:right-6 sm:top-6">
+    &times;
+  </button>
+</div>

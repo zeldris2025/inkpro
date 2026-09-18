@@ -1,0 +1,51 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}My quotes — InkPro{% endblock %}
+{% block content %}
+<section class="ink-grid pb-24 pt-32">
+  <div class="absolute inset-0 halftone opacity-20"></div>
+  <div class="relative mx-auto max-w-5xl px-4 sm:px-6">
+    <div class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <h1 class="font-display text-4xl sm:text-5xl">My quotes</h1>
+        <p class="mt-2 text-white/55">{{ quotes|length }} quote{{ quotes|length|pluralize }} on your account.</p>
+      </div>
+      <div class="flex gap-3">
+        <a href="{% url 'profile' %}" class="ink-btn-ghost">Profile</a>
+        <a href="{% url 'quote_builder' %}" class="ink-btn">New quote</a>
+      </div>
+    </div>
+
+    {% if quotes %}
+    <div data-reveal-group class="mt-10 space-y-4">
+      {% for quote in quotes %}
+      <a href="{% url 'my_quote_detail' quote.pk %}" class="ink-card reveal flex flex-wrap items-center justify-between gap-4 p-6">
+        <div class="min-w-0">
+          <div class="flex items-center gap-3">
+            <span class="font-display text-lg">{{ quote.quote_number }}</span>
+            <span class="rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest
+              {% if quote.status == 'ACCEPTED' %}bg-green-500/20 text-green-300
+              {% elif quote.status == 'DECLINED' %}bg-red-500/20 text-red-300
+              {% elif quote.status == 'SENT' %}bg-ink-yellow/20 text-ink-yellow
+              {% else %}bg-white/10 text-white/60{% endif %}">{{ quote.get_status_display }}</span>
+            {% if quote.is_urgent %}<span class="rounded-full bg-ink-magenta/20 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-ink-magenta">Rush</span>{% endif %}
+          </div>
+          <p class="mt-1 truncate text-sm text-white/45">{{ quote.created_at|date:"j M Y" }} · {{ quote.items.count }} item{{ quote.items.count|pluralize }}</p>
+        </div>
+        <div class="text-right">
+          <div class="font-display text-xl text-ink-yellow tabular">${{ quote.total|floatformat:2|intcomma }}</div>
+          {% if quote.status == 'SENT' %}<div class="text-xs font-bold uppercase tracking-widest text-ink-yellow">Awaiting your reply</div>{% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="ink-card mt-10 p-12 text-center">
+      <div class="text-5xl">🖨️</div>
+      <p class="mt-4 font-display text-xl">No quotes yet.</p>
+      <p class="mt-2 text-white/50">Build your first one — it takes about two minutes.</p>
+      <a href="{% url 'quote_builder' %}" class="ink-btn mt-6">Start a quote</a>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

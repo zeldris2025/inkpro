@@ -1,0 +1,51 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}{{ quote.quote_number }} — InkPro{% endblock %}
+{% block content %}
+<section class="ink-grid pb-24 pt-32">
+  <div class="absolute inset-0 halftone opacity-20"></div>
+  <div class="relative mx-auto max-w-4xl px-4 sm:px-6">
+    <a href="{% url 'my_quotes' %}" class="text-sm font-semibold text-white/50 transition hover:text-ink-yellow">← My quotes</a>
+
+    <div class="mt-6 flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <h1 class="font-display text-4xl">{{ quote.quote_number }}</h1>
+        <p class="mt-2 text-white/50">Requested {{ quote.created_at|date:"j M Y" }}</p>
+      </div>
+      <span class="rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest
+        {% if quote.status == 'ACCEPTED' %}bg-green-500/20 text-green-300
+        {% elif quote.status == 'DECLINED' %}bg-red-500/20 text-red-300
+        {% elif quote.status == 'SENT' %}bg-ink-yellow/20 text-ink-yellow
+        {% else %}bg-white/10 text-white/60{% endif %}">{{ quote.get_status_display }}</span>
+    </div>
+
+    <div class="ink-card mt-8 overflow-hidden">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-white/5 text-xs uppercase tracking-wider text-white/45">
+          <tr><th class="px-5 py-3">Item</th><th class="px-5 py-3 text-right">Qty</th><th class="px-5 py-3 text-right">Total</th></tr>
+        </thead>
+        <tbody class="divide-y divide-white/5">
+          {% for item in items %}
+          <tr>
+            <td class="px-5 py-4"><div class="font-semibold">{{ item.description }}</div>{% if item.size %}<div class="text-xs text-white/40">{{ item.size }}</div>{% endif %}</td>
+            <td class="px-5 py-4 text-right tabular">{{ item.quantity }}</td>
+            <td class="px-5 py-4 text-right font-bold tabular">${{ item.line_total|floatformat:2|intcomma }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr class="border-t border-white/15"><td colspan="2" class="px-5 py-4 text-right font-display text-lg">Total</td><td class="px-5 py-4 text-right font-display text-xl text-ink-yellow tabular">${{ quote.total|floatformat:2|intcomma }}</td></tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="mt-8 flex flex-wrap gap-3">
+      {% if quote.status in 'SENT ACCEPTED DECLINED' %}
+      <a href="{% url 'public_quote' quote.access_token %}" class="ink-btn">View full quote</a>
+      {% endif %}
+      <form method="post" action="{% url 'reorder_quote' quote.pk %}">{% csrf_token %}
+        <button type="submit" class="ink-btn-ghost">Re-order this job</button>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}

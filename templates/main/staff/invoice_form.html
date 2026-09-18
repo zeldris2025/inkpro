@@ -1,0 +1,26 @@
+{% extends "main/staff/base_staff.html" %}
+{% block staff_title %}{% if invoice %}Edit entry{% else %}New entry{% endif %}{% endblock %}
+{% block staff_content %}
+<a href="{% url 'staff_register' %}" class="text-sm font-semibold text-white/50 transition hover:text-ink-yellow">← Register</a>
+<h1 class="mt-5 font-display text-3xl">{% if invoice %}Edit {{ invoice.invoice_no|default:"entry" }}{% else %}New register entry{% endif %}</h1>
+
+<form method="post" class="mt-7 max-w-3xl rounded-xl border border-white/10 bg-white p-7 text-zinc-900">
+  {% csrf_token %}
+  <div class="grid gap-5 sm:grid-cols-2">
+    {% for field in form %}
+    <div class="{% if field.name in 'job_details notes' %}sm:col-span-2{% endif %}">
+      <label for="{{ field.id_for_label }}" class="mb-1.5 block text-xs font-bold uppercase tracking-widest text-zinc-500">{{ field.label }}</label>
+      {{ field }}
+      {% if field.help_text %}<p class="mt-1 text-xs text-zinc-400">{{ field.help_text }}</p>{% endif %}
+      {% for error in field.errors %}<p class="mt-1 text-xs font-semibold text-red-600">{{ error }}</p>{% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% if form.non_field_errors %}<div class="mt-5 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">{{ form.non_field_errors }}</div>{% endif %}
+  <p class="mt-5 text-xs text-zinc-500">Balance and payment status are recalculated automatically unless you tick the manual override.</p>
+  <div class="mt-6 flex gap-3">
+    <button type="submit" class="ink-btn">Save entry</button>
+    <a href="{% url 'staff_register' %}" class="ink-btn-ghost border-zinc-300 text-zinc-700 hover:text-zinc-900">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% load humanize %}
+{% comment %}
+Live price sidebar. Swapped in by HTMX whenever the draft quote changes, so the
+figures always come from Quote.recalculate() rather than being recomputed in JS.
+{% endcomment %}
+<div class="ink-card p-6">
+  <h2 class="font-display text-lg">Your quote</h2>
+
+  {% if items %}
+  <ul class="mt-5 space-y-3">
+    {% for item in items %}
+    <li class="flex items-start justify-between gap-3 border-b border-white/5 pb-3 text-sm">
+      <div class="min-w-0 flex-1">
+        <div class="truncate font-semibold">{{ item.description }}</div>
+        <div class="text-xs text-white/45">
+          {% if item.size %}{{ item.size }} · {% endif %}Qty {{ item.quantity }} @ ${{ item.unit_price|floatformat:2|intcomma }}
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="font-bold tabular">${{ item.line_total|floatformat:2|intcomma }}</span>
+        <button hx-post="{% url 'quote_remove_item' item.pk %}"
+                hx-target="#quote-summary" hx-swap="innerHTML"
+                hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                class="text-white/30 transition hover:text-red-400" aria-label="Remove {{ item.description }}">&times;</button>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <dl class="mt-5 space-y-2 text-sm">
+    <div class="flex justify-between text-white/60"><dt>Subtotal</dt><dd class="tabular">${{ quote.subtotal|floatformat:2|intcomma }}</dd></div>
+    {% if quote.discount %}<div class="flex justify-between text-green-400"><dt>Discount</dt><dd class="tabular">−${{ quote.discount|floatformat:2|intcomma }}</dd></div>{% endif %}
+    {% if quote.urgent_fee %}<div class="flex justify-between text-ink-magenta"><dt>Urgent fee</dt><dd class="tabular">${{ quote.urgent_fee|floatformat:2|intcomma }}</dd></div>{% endif %}
+    <div class="flex justify-between text-white/60"><dt>GST ({{ GST_RATE_PCT }}%)</dt><dd class="tabular">${{ quote.gst_amount|floatformat:2|intcomma }}</dd></div>
+    <div class="mt-3 flex items-baseline justify-between border-t border-white/15 pt-3">
+      <dt class="font-display text-base">Total</dt>
+      <dd class="font-display text-2xl text-ink-yellow tabular">${{ quote.total|floatformat:2|intcomma }}</dd>
+    </div>
+  </dl>
+
+  <p class="mt-4 text-xs leading-relaxed text-white/40">Indicative only — our team confirms the final figure before your quote is issued.</p>
+
+  {% if not on_review_step %}
+  <a href="{% url 'quote_review' %}" class="ink-btn mt-5 w-full justify-center">Continue →</a>
+  {% endif %}
+  <a href="{% url 'quote_builder' %}" class="mt-3 block text-center text-xs font-bold uppercase tracking-widest text-white/40 transition hover:text-ink-yellow">+ Add another item</a>
+
+  {% else %}
+  <p class="mt-4 text-sm text-white/50">Nothing added yet. Pick a service to get started and your running total will show up here.</p>
+  {% if urgent_fee_band %}
+  <p class="mt-4 rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-white/50">
+    Rush jobs carry a ${{ urgent_fee_band.min_amount|floatformat:0 }}–${{ urgent_fee_band.max_amount|floatformat:0 }} urgency fee.
+  </p>
+  {% endif %}
+  {% endif %}
+</div>

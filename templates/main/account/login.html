@@ -1,0 +1,16 @@
+{% extends "main/account/base_auth.html" %}
+{% block title %}Sign in — InkPro{% endblock %}
+{% block auth_heading %}Welcome back.{% endblock %}
+{% block auth_intro %}Sign in to track your quotes and re-order past jobs.{% endblock %}
+{% block auth_body %}
+<form method="post">
+  {% csrf_token %}
+  {% include "main/account/_form_fields.html" %}
+  {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+  <button type="submit" class="ink-btn w-full justify-center">Sign in</button>
+  <p class="mt-4 text-center">
+    <a href="{% url 'password_reset' %}" class="text-sm font-semibold text-white/50 underline underline-offset-4 transition hover:text-ink-yellow">Forgotten your password?</a>
+  </p>
+</form>
+{% endblock %}
+{% block auth_footer %}No account? <a href="{% url 'signup' %}" class="font-bold text-ink-yellow underline underline-offset-4">Create one</a>{% endblock %}

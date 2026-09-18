@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% comment %}
+Shared shell for the account screens: sign in, sign up, and the four steps of
+the password reset. Keeps the six pages visually identical so only the heading,
+copy and form differ.
+{% endcomment %}
+{% block content %}
+<section class="relative flex min-h-screen items-center overflow-hidden ink-grid pt-28">
+  <div class="absolute inset-0 halftone opacity-20"></div>
+  <div class="relative mx-auto w-full max-w-md px-4 py-16 sm:px-6">
+
+    {% block auth_icon %}{% endblock %}
+    <h1 class="font-display text-4xl leading-tight">{% block auth_heading %}{% endblock %}</h1>
+    <p class="mt-3 text-white/60">{% block auth_intro %}{% endblock %}</p>
+
+    <div class="ink-card mt-8 p-8">
+      {% block auth_body %}{% endblock %}
+    </div>
+
+    <p class="mt-6 text-center text-sm text-white/50">{% block auth_footer %}{% endblock %}</p>
+  </div>
+</section>
+{% endblock %}

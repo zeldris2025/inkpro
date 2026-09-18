@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: inkpro
+      POSTGRES_USER: inkpro
+      POSTGRES_PASSWORD: inkpro
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inkpro"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+
+  web:
+    build: .
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py seed_ratecard &&
+             python manage.py bootstrap_groups &&
+             gunicorn inkpro.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"
+    environment:
+      DEBUG: "False"
+      DATABASE_URL: postgres://inkpro:inkpro@db:5432/inkpro
+      CELERY_BROKER_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      SITE_URL: ${SITE_URL:-http://localhost:8000}
+    volumes: [media:/app/media]
+    ports: ["8000:8000"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_started}
+
+  worker:
+    build: .
+    command: celery -A inkpro worker -l info
+    environment:
+      DATABASE_URL: postgres://inkpro:inkpro@db:5432/inkpro
+      CELERY_BROKER_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+    volumes: [media:/app/media]
+    depends_on: [db, redis]
+
+  beat:
+    build: .
+    command: celery -A inkpro beat -l info
+    environment:
+      DATABASE_URL: postgres://inkpro:inkpro@db:5432/inkpro
+      CELERY_BROKER_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+    depends_on: [db, redis]
+
+volumes:
+  pgdata:
+  media:

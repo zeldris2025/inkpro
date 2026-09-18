@@ -1,0 +1,209 @@
+/* InkPro brand layer — sits on top of the Tailwind CDN build.
+   Everything here is either a reusable component class used across templates
+   or an effect Tailwind cannot express (halftone texture, ink splatter). */
+
+[x-cloak] { display: none !important; }
+
+:root {
+  --ink-yellow: #FFD200;
+  --ink-black: #0A0A0A;
+  --ink-cyan: #00AEEF;
+  --ink-magenta: #EC008C;
+}
+
+/* --- buttons ------------------------------------------------------------ */
+.ink-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  background: var(--ink-yellow);
+  padding: 0.7rem 1.6rem;
+  font-weight: 800;
+  font-size: 0.875rem;
+  color: #000;
+  letter-spacing: 0.01em;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s, background 0.2s;
+  box-shadow: 0 6px 20px -6px rgba(255, 210, 0, 0.6);
+}
+.ink-btn:hover { transform: translateY(-2px); background: #ffdd3d; box-shadow: 0 12px 28px -8px rgba(255, 210, 0, 0.75); }
+.ink-btn:active { transform: translateY(0); }
+
+.ink-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 0.7rem 1.6rem;
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: #fff;
+  transition: all 0.2s;
+}
+.ink-btn-ghost:hover { border-color: var(--ink-yellow); color: var(--ink-yellow); transform: translateY(-2px); }
+
+/* --- cards -------------------------------------------------------------- */
+.ink-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.35s, box-shadow 0.35s;
+}
+.ink-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(255, 210, 0, 0.5);
+  box-shadow: 0 24px 48px -24px rgba(255, 210, 0, 0.35);
+}
+/* A CMYK sweep that wipes across the card on hover. */
+.ink-card::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--ink-cyan), var(--ink-magenta), var(--ink-yellow));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ink-card:hover::after { transform: scaleX(1); }
+
+/* --- texture ------------------------------------------------------------ */
+.halftone {
+  background-image: radial-gradient(rgba(255, 210, 0, 0.16) 1px, transparent 1px);
+  background-size: 14px 14px;
+}
+.ink-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+/* --- scroll reveal ------------------------------------------------------
+   Elements start hidden and are revealed by GSAP ScrollTrigger. The
+   `no-js`/reduced-motion guards in inkpro.js reveal everything immediately so
+   content is never trapped behind an animation that will not run. */
+.reveal { opacity: 0; transform: translateY(28px); }
+.reveal-ready .reveal { will-change: opacity, transform; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1 !important; transform: none !important; }
+  .ink-card, .ink-btn { transition: none !important; }
+  html { scroll-behavior: auto; }
+}
+
+/* --- ink splatter click effect ------------------------------------------ */
+.ink-splat {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  border-radius: 9999px;
+  background: var(--ink-yellow);
+  mix-blend-mode: screen;
+  animation: ink-splat 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes ink-splat {
+  from { transform: scale(0); opacity: 0.85; }
+  to   { transform: scale(3.5); opacity: 0; }
+}
+
+/* --- misc --------------------------------------------------------------- */
+.ink-underline {
+  background-image: linear-gradient(var(--ink-yellow), var(--ink-yellow));
+  background-size: 100% 0.35em;
+  background-position: 0 88%;
+  background-repeat: no-repeat;
+  padding: 0 0.1em;
+  color: #000;
+}
+.step-dot { transition: all 0.3s; }
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Print: strip the dark theme so quotes come out on white paper. */
+@media print {
+  header, footer, .no-print { display: none !important; }
+  body { background: #fff !important; color: #000 !important; }
+}
+
+/* --- WebGL layer ---------------------------------------------------------
+   The canvas is fixed behind the page (z-0) with content at z-10. When the
+   scene is live the hero's blurred colour blobs are dialled back so they do
+   not muddy the 3D behind them; without it, they stay as the main hero
+   treatment. */
+#ink3d-layer { contain: strict; }
+#ink3d-canvas { display: block; }
+
+.has-3d [data-hero] [data-hero-blob] { opacity: 0.45; }
+.has-3d [data-hero] .halftone { opacity: 0.18; }
+
+/* The fallback illustration drifts gently with the existing parallax hook. */
+#ink3d-fallback img { will-change: transform; }
+
+@media (prefers-reduced-motion: reduce) {
+  #ink3d-fallback img { transform: translate(-50%, -50%) !important; }
+}
+
+/* The scene is scenery: it must never out-shout the copy sitting on top of
+   it, so it fades in to a backdrop opacity rather than full strength. */
+#ink3d-canvas.ink3d-visible { opacity: 0.65; }
+@media (max-width: 767px) { #ink3d-canvas.ink3d-visible { opacity: 0.45; } }
+
+/* --- launch promo marquee ------------------------------------------------
+   The track carries the message twice; sliding it exactly -50% puts the second
+   copy where the first started, so the loop is seamless. Only `transform` is
+   animated, so it stays on the compositor and never triggers layout. */
+.ink-marquee {
+  position: relative;
+  overflow: hidden;
+  border-block: 1px solid rgba(255, 210, 0, 0.35);
+  background: linear-gradient(90deg, rgba(255, 210, 0, 0.12), rgba(255, 210, 0, 0.04));
+  padding-block: 0.6rem;
+  /* Fade the ends so the text slides in and out rather than being clipped. */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent);
+}
+
+.ink-marquee__track {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  animation: ink-marquee 32s linear infinite;
+  will-change: transform;
+}
+
+.ink-marquee:hover .ink-marquee__track,
+.ink-marquee:focus-within .ink-marquee__track {
+  animation-play-state: paused;
+}
+
+.ink-marquee__item {
+  /* Tuned so the whole offer very nearly fits the hero text column in one
+     pass, rather than only ever showing a fragment of it. */
+  padding-inline: 0.85rem;
+  font-weight: 800;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-yellow);
+}
+
+.ink-marquee__sep {
+  display: inline-flex;
+  color: rgba(255, 210, 0, 0.5);
+}
+
+@keyframes ink-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Stop scrolling entirely and centre a single legible copy. */
+  .ink-marquee__track { animation: none; width: 100%; justify-content: center; }
+  .ink-marquee__track > *:nth-child(n + 3) { display: none; }
+  .ink-marquee { -webkit-mask-image: none; mask-image: none; }
+}

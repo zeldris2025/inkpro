@@ -1,0 +1,17 @@
+{% extends "main/email/base_email.html" %}{% load humanize %}
+{% block email_body %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;border:1px solid #e4e4e7;border-radius:10px;margin:20px 0;">
+  <tr><td style="padding:18px 20px;font-size:14px;color:#3f3f46;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr><td style="padding:4px 0;">Invoice</td><td align="right" style="font-weight:700;color:#18181b;">{{ invoice.invoice_no|default:"—" }}</td></tr>
+      {% if invoice.date %}<tr><td style="padding:4px 0;">Dated</td><td align="right" style="color:#18181b;">{{ invoice.date|date:"j F Y" }}</td></tr>{% endif %}
+      <tr><td style="padding:4px 0;">Job</td><td align="right" style="color:#18181b;">{{ invoice.job_details|truncatewords:10 }}</td></tr>
+      <tr><td style="padding:4px 0;">Invoiced</td><td align="right" style="color:#18181b;">${{ invoice.invoice_amount|floatformat:2|intcomma }}</td></tr>
+      <tr><td style="padding:4px 0;">Received</td><td align="right" style="color:#16a34a;">${{ invoice.amount_received|floatformat:2|intcomma }}</td></tr>
+      <tr><td style="padding:10px 0 0;border-top:2px solid #18181b;font-weight:900;color:#18181b;">Balance due</td>
+          <td align="right" style="padding:10px 0 0;border-top:2px solid #18181b;font-size:18px;font-weight:900;color:#EC008C;">${{ invoice.balance|floatformat:2|intcomma }}</td></tr>
+    </table>
+  </td></tr>
+</table>
+<p style="margin:0;color:#52525b;font-size:14px;">Reply to this email if anything looks wrong and we'll sort it out.</p>
+{% endblock %}

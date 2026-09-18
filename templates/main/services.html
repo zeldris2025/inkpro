@@ -1,0 +1,87 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}Services & Rate Card — InkPro{% endblock %}
+{% block content %}
+<section class="relative overflow-hidden ink-grid pb-16 pt-36">
+  <div class="absolute inset-0 halftone opacity-30"></div>
+  <div class="relative mx-auto max-w-7xl px-4 sm:px-6">
+    <span class="text-xs font-bold uppercase tracking-[0.3em] text-ink-yellow">Rate card</span>
+    <h1 class="mt-4 font-display text-5xl leading-none sm:text-7xl">Everything we print,<br><span class="text-ink-yellow">priced up front.</span></h1>
+    <p class="mt-6 max-w-2xl text-lg text-white/60">All prices are in <strong class="text-white">Samoan Tala ({{ CURRENCY_CODE }})</strong> and exclude GST unless marked. GST is charged at {{ GST_RATE_PCT }}%. Size-based work is priced per square metre — rate × size + GST.</p>
+    <a href="{% url 'quote_builder' %}" class="ink-btn mt-8">Build a quote</a>
+  </div>
+</section>
+
+<section class="pb-24">
+  {# One lightbox instance for the whole page; each thumbnail feeds it. #}
+  <div data-reveal-group class="mx-auto max-w-7xl space-y-6 px-4 sm:px-6"
+       x-data="{ open: false, current: null }">
+    {% for category in categories %}
+    <article class="reveal ink-card overflow-hidden">
+      <div class="grid gap-6 p-7 lg:grid-cols-3 lg:gap-10">
+        <div class="lg:col-span-1">
+          <h2 class="font-display text-2xl leading-tight">{{ category.name }}</h2>
+          <p class="mt-3 text-sm leading-relaxed text-white/55">{{ category.description }}</p>
+          {% if category.images.all %}
+          <div class="mt-5 grid grid-cols-3 gap-2">
+            {% for image in category.images.all|slice:":6" %}
+            <button type="button"
+                    @click="current = { src: '{{ image.image.url }}', caption: '{{ image.caption|default:image.description|escapejs }}', category: '{{ category.name|escapejs }}' }; open = true"
+                    class="group/thumb relative aspect-square overflow-hidden rounded-lg"
+                    aria-label="Enlarge: {{ image.description }}">
+              <img src="{{ image.image.url }}" alt="{{ image.description }}" loading="lazy"
+                   class="h-full w-full object-cover transition duration-500 group-hover/thumb:scale-110">
+              <span class="absolute inset-0 flex items-center justify-center bg-black/55 opacity-0 transition group-hover/thumb:opacity-100">
+                <svg class="h-6 w-6 text-ink-yellow" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14zM11 8v6M8 11h6"/>
+                </svg>
+              </span>
+            </button>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <a href="{{ category.get_absolute_url }}" class="mt-5 inline-flex items-center gap-1 text-sm font-bold text-ink-yellow hover:gap-2 transition-all">Details →</a>
+        </div>
+
+        <div class="lg:col-span-2">
+          <div class="overflow-x-auto rounded-xl border border-white/10">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-white/5 text-xs uppercase tracking-wider text-white/45">
+                <tr>
+                  <th class="px-4 py-3 font-bold">Option</th>
+                  <th class="px-4 py-3 font-bold">Unit</th>
+                  <th class="px-4 py-3 text-right font-bold">Normal</th>
+                  <th class="px-4 py-3 text-right font-bold">Incl. GST</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-white/5">
+                {% for rule in category.pricing_rules.all %}
+                <tr class="transition hover:bg-white/5">
+                  <td class="px-4 py-3 font-semibold">
+                    {{ rule.name }}
+                    {% if rule.min_qty > 1 %}<span class="ml-2 rounded bg-ink-cyan/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-ink-cyan">min {{ rule.min_qty }}</span>{% endif %}
+                    {% if rule.notes %}<div class="mt-1 text-xs font-normal text-white/40">{{ rule.notes }}</div>{% endif %}
+                  </td>
+                  <td class="px-4 py-3 text-white/50">{{ rule.unit_label }}</td>
+                  <td class="px-4 py-3 text-right font-bold tabular text-ink-yellow">{{ rule.price_range_label }}</td>
+                  <td class="px-4 py-3 text-right tabular text-white/60">
+                    {% if rule.pricing_type == 'PER_UNIT_RANGE' %}—{% else %}${{ rule.display_price_inc_gst|floatformat:2|intcomma }}{% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </article>
+    {% endfor %}
+
+    {% include "main/partials/_lightbox.html" %}
+
+    <div class="reveal rounded-2xl border border-ink-magenta/30 bg-ink-magenta/10 p-7">
+      <h3 class="font-display text-xl text-ink-magenta">Need it today?</h3>
+      <p class="mt-2 text-sm text-white/70">Same-day and rush jobs carry an urgency fee of <strong class="text-white">$50 – $100</strong> on top of the normal price, depending on the job. Tick the urgent box in the quote builder and we'll confirm the exact figure.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}

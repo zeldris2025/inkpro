@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Static stand-in for the WebGL layer, shown to low-power devices, visitors
+     who prefer reduced motion, and anywhere WebGL is unavailable. Flat vector,
+     brand palette, no gradients that would band on cheap panels. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 520" width="760" height="520"
+     fill="none" role="presentation">
+  <defs>
+    <pattern id="halftone" width="16" height="16" patternUnits="userSpaceOnUse">
+      <circle cx="3" cy="3" r="1.6" fill="#FFD200" opacity="0.5"/>
+    </pattern>
+  </defs>
+
+  <!-- press frame -->
+  <rect x="120" y="120" width="520" height="300" rx="18" stroke="#FFD200" stroke-width="3" opacity="0.55"/>
+  <rect x="150" y="150" width="460" height="240" rx="10" fill="url(#halftone)" opacity="0.35"/>
+
+  <!-- rollers -->
+  <rect x="150" y="186" width="460" height="42" rx="21" fill="#FFD200" opacity="0.8"/>
+  <rect x="150" y="300" width="460" height="42" rx="21" fill="#FFD200" opacity="0.45"/>
+  <g stroke="#0A0A0A" stroke-width="2.5" opacity="0.55">
+    <line x1="200" y1="186" x2="200" y2="228"/><line x1="280" y1="186" x2="280" y2="228"/>
+    <line x1="360" y1="186" x2="360" y2="228"/><line x1="440" y1="186" x2="440" y2="228"/>
+    <line x1="520" y1="186" x2="520" y2="228"/>
+  </g>
+
+  <!-- sheet feeding through -->
+  <path d="M190 264 h380 l-26 44 h-380 Z" fill="#FFFFFF" opacity="0.14"/>
+  <path d="M190 264 h380" stroke="#FFD200" stroke-width="2.5" opacity="0.8"/>
+
+  <!-- CMYK registration marks -->
+  <circle cx="612" cy="452" r="15" fill="#00AEEF" opacity="0.65"/>
+  <circle cx="644" cy="452" r="15" fill="#EC008C" opacity="0.65"/>
+  <circle cx="676" cy="452" r="15" fill="#FFD200" opacity="0.75"/>
+  <circle cx="708" cy="452" r="15" fill="#FFFFFF" opacity="0.28"/>
+
+  <!-- ink drips -->
+  <g fill="#FFD200" opacity="0.7">
+    <circle cx="238" cy="366" r="5"/><circle cx="238" cy="392" r="3"/>
+    <circle cx="418" cy="372" r="6"/><circle cx="418" cy="402" r="3.2"/>
+    <circle cx="536" cy="362" r="4"/>
+  </g>
+
+  <!-- uprights -->
+  <rect x="96" y="150" width="26" height="300" rx="8" fill="#FFD200" opacity="0.3"/>
+  <rect x="638" y="150" width="26" height="300" rx="8" fill="#FFD200" opacity="0.3"/>
+</svg>

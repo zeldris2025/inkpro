@@ -1,0 +1,446 @@
+# InkPro
+
+> Think Ink, Think Pro
+
+A Django application for InkPro, a printing company. It serves three audiences
+from one codebase:
+
+- **Public visitors** — an animated marketing site built on the live rate card.
+- **Customers** — a multi-step quote builder with live pricing, plus an optional
+  account for tracking and re-ordering.
+- **Staff** — a quote review pipeline with one-click approve-and-send, a sales
+  dashboard, and the Recharge Register.
+
+---
+
+## Quick start
+
+```bash
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+cp .env.example .env            # optional; sensible defaults apply without it
+
+python manage.py migrate
+python manage.py seed_ratecard  # loads the published rate card
+python manage.py bootstrap_groups
+python manage.py seed_demo      # optional demo data for the dashboard
+python manage.py runserver
+```
+
+`seed_demo` creates a staff login — username `staff`, password `inkpro123`.
+Create a real superuser with `python manage.py createsuperuser`.
+
+| Area | URL |
+| --- | --- |
+| Marketing site | `/` |
+| Quote builder | `/quote/` |
+| Customer account | `/my/quotes/` |
+| Staff dashboard | `/staff/` |
+| Quote inbox | `/staff/quotes/` |
+| Recharge Register | `/staff/register/` |
+| Django admin | `/admin/` |
+
+---
+
+## Logo assets
+
+There are two masters, because the mark is drawn differently for light and dark
+backgrounds. They live in **`assets/`**, not `static/img/`, so regenerating the
+site assets can never overwrite the source artwork:
+
+| Master | Artwork |
+| --- | --- |
+| `assets/logo-master-on-light.png` | Black splat, yellow script, black tagline |
+| `assets/logo-master-on-dark.png` | Yellow splat, black script, yellow tagline |
+
+```bash
+python manage.py build_logo_assets
+```
+
+Each master arrives as flat artwork with generous margins — one on white, one
+on black. The command reads the background colour from the corners rather than
+assuming white, floods it out to transparency from the edges, trims the
+margins, and writes:
+
+| File | Used by |
+| --- | --- |
+| `inkpro-logo.png` | White footer, transactional email, quote PDF |
+| `inkpro-logo-on-dark.png` | Site header |
+| `favicon.png` | Browser tab — the splat alone, legible at 16px |
+
+Flooding from the border rather than replacing every matching pixel means areas
+*inside* the artwork that share the background colour survive: the black script
+on the dark master, the white letter counters on the light one.
+
+**Nothing is recoloured.** Each surface gets the artwork that was drawn for it,
+with its own colours intact. If the generated files are missing, the templates
+fall back to a text lockup rather than a broken image.
+
+---
+
+## Product photography
+
+InkPro's rate card PDF is the only place the product photos exist, so they are
+extracted from it:
+
+```bash
+python manage.py import_ratecard_images "INKPRO Material Rates.pdf"
+python manage.py import_ratecard_images rates.pdf --dry-run
+```
+
+This pulls the 32 embedded photos, downscales them to 1280px and re-encodes
+them as progressive JPEG (roughly 1.6MB total, down from print weight), then
+files each one against its service category as a `CategoryImage`.
+
+Photos are matched by **content hash**, not page position, so the mapping
+survives the PDF being re-exported or re-ordered, and re-running updates rows
+in place rather than duplicating them. Categories without photography fall back
+to their emoji icon, so nothing breaks before the import is run.
+
+The photos drive the service cards, the per-service galleries, the quote
+wizard's category picker and the portfolio page. Clicking any of them opens a
+lightbox — one shared partial, `main/partials/_lightbox.html`, closing on
+Escape, backdrop click or the close button, and locking page scroll while open.
+Images render at their natural size rather than being upscaled.
+
+Everything is editable in the admin afterwards; `CategoryImage` is an ordinary
+model with an inline on `ServiceCategory`.
+
+---
+
+## Importing the existing register
+
+The historical "INKPRO Recharge Register" spreadsheet imports straight into the
+`Invoice` table:
+
+```bash
+python manage.py import_register "INKPRO Recharge Register 2026.xlsx"
+python manage.py import_register register.xlsx --sheet 2026 --dry-run
+python manage.py import_register register.xlsx --link-customers
+```
+
+The importer is written for a hand-maintained workbook. It finds the header row
+anywhere in the first 20 rows, matches columns by fuzzy name rather than fixed
+position, parses money and dates whether they are real Excel values or text
+(`$1,234.50`, `12/03/2026`), skips blank and `TOTAL` rows, and is idempotent —
+rows are matched on invoice number, so re-running updates rather than
+duplicates. A spreadsheet status of `TBC` is preserved; every other status is
+re-derived from the balance.
+
+`--dry-run` parses and reports without writing anything.
+
+Validated against the real *INKPRO Recharge Register 2026* workbook: the
+importer finds the header on row 8, matches all 12 columns, skips the title and
+summary blocks and the alternating blank rows, and lands all 9 data rows.
+Totals reconcile against the spreadsheet's own summary block — **total
+invoiced, total received, paid count and unpaid count all match exactly**.
+
+The one figure that differs is `OUTSTANDING`. The workbook reports 8,685, which
+is simply its total-invoiced figure: its per-row Balance column was never
+updated on the two paid invoices, so summing that column double-counts them.
+The correct outstanding balance is 8,685 − 2,961 = **5,724**, which is what
+this system computes, because `Invoice.save()` always derives the balance from
+`invoice_amount − amount_received` rather than trusting a stored value.
+
+---
+
+## Launch promotion
+
+A marquee in the homepage hero announces the launch offer. Both the copy and
+the on/off switch are settings, because a launch offer is temporary by
+definition and retiring it after the 20th sale should not need a code change:
+
+```
+LAUNCH_PROMO_ENABLED=True
+LAUNCH_PROMO_TEXT=We just launched — our first 20 sales will receive a massive 50% discount
+```
+
+It is pure CSS. The track holds the message twice and slides exactly -50%, so
+the second copy lands where the first began and the loop is seamless with no
+JavaScript — only `transform` animates, so it stays on the compositor and never
+triggers layout. It pauses on hover and on keyboard focus.
+
+The moving copies are hidden from assistive technology, which would otherwise
+read the message several times in a jumble; a single static copy is exposed
+instead. Under `prefers-reduced-motion` the scrolling stops entirely and one
+centred, legible copy is shown.
+
+---
+
+## Currency and locale
+
+Prices are **Samoan Tala (WST)**, and the business runs on `Pacific/Apia` time —
+which matters, because the same-day urgency fee and every quote timestamp
+depend on the clock. WST shares the `$` symbol with several other currencies,
+so the code and name are stated explicitly wherever an amount could be
+misread: the public rate card, the site footer, the emailed quote and the
+quote PDF.
+
+`LANGUAGE_CODE` is `en-nz` purely for its `d/m/Y` date and number formatting;
+Django ships no `en-ws` locale.
+
+---
+
+## How pricing works
+
+All arithmetic lives in [`main/pricing.py`](main/pricing.py), free of model
+imports so it can be unit tested on its own. Money is `Decimal` throughout,
+rounded half-up to cents at each boundary.
+
+| Pricing type | Behaviour |
+| --- | --- |
+| `FLAT_RATE` | `base_price` per unit — A4 heat press at $15 |
+| `PER_METER` | `base_price` is a **per-square-metre** rate: a 2m × 1m banner at $140/m² is $280 |
+| `CUSTOM_SIZE_FORMULA` | Same as above, for sizes outside the standard tiers |
+| `PER_UNIT_RANGE` | Open-ended rows (vehicle decals, $20–$60). Quotes the floor until staff pin down a figure |
+
+Prices are stored and quoted **GST-exclusive**. GST (15%, configurable via
+`GST_RATE`) is levied on the subtotal less any discount, plus the urgency fee.
+`Quote.total_override` lets staff force a negotiated number onto a quote while
+still showing the calculated components.
+
+The rate card tiers seeded by `seed_ratecard` reproduce the published figures
+exactly — a 2m × 1m banner is $280, or $322 including GST.
+
+---
+
+## The quote workflow
+
+```
+DRAFT → SUBMITTED → IN_REVIEW ⇄ REVISED → APPROVED → SENT → ACCEPTED
+                                                          ↘ DECLINED
+```
+
+Transitions are enforced by `Quote.transition_to()`, which raises
+`InvalidTransition` rather than silently allowing an illegal move, and stamps
+the relevant timestamps as it goes. `ACCEPTED` is terminal.
+
+The wizard writes straight to a `DRAFT` quote rather than a session cart, so
+artwork uploads land in real storage and the live sidebar totals come from the
+same code that prices the final quote.
+
+**Approve & send** (one button on the staff review screen) approves the quote,
+renders the branded PDF, and emails it with accept/decline links that work
+without a login — they authenticate on a per-quote random token. Acceptance
+opens a `NOT_PAID` entry in the register automatically, and does so idempotently
+so a double-click cannot create two invoices.
+
+---
+
+## Layout
+
+```
+inkpro/            project settings, URLs, Celery app
+main/
+  models.py        catalogue, quotes, invoices, email templates
+  pricing.py       pure pricing arithmetic (unit tested)
+  views.py         marketing, quote wizard, customer account
+  views_staff.py   staff portal, approve-and-send, register
+  api.py           DRF endpoints for the dashboard and live pricing
+  emails.py        branded transactional email
+  pdf.py           WeasyPrint quote documents
+  tasks.py         Celery tasks with an inline fallback
+  permissions.py   role groups and access helpers
+  management/commands/
+    seed_ratecard.py    load the published rate card
+    import_register.py  import the historical spreadsheet
+    bootstrap_groups.py create the role groups
+    seed_demo.py        demo data for development
+templates/         base, marketing, wizard, account, staff, email, pdf
+static/            brand CSS, animation JS, logo assets
+```
+
+A single `main` app is used rather than five separate ones. The domain is small
+and tightly coupled — quotes reference the catalogue, invoices reference quotes
+— and splitting it would add import ceremony without buying isolation.
+
+---
+
+## Front end
+
+Tailwind, Alpine, HTMX, GSAP and Chart.js all load from CDNs, so there is **no
+build step** — clone and run. Tailwind's brand tokens (`ink-yellow`,
+`ink-black`, `ink-cyan`, `ink-magenta`, `font-display`) are configured inline in
+`templates/base.html`; reusable component classes and effects Tailwind cannot
+express live in `static/css/inkpro.css`.
+
+Interactivity is server-rendered wherever it touches money. The wizard's live
+price and the quote sidebar are HTMX fragments rendered by Django, so the figure
+on screen always comes from the same code that builds the quote. Alpine handles
+only local UI state — menus, toggles, the testimonial carousel.
+
+Animations degrade safely: if GSAP fails to load, or the visitor has
+`prefers-reduced-motion` set, `static/js/inkpro.js` clears the reveal classes
+immediately so no content is ever trapped behind an animation that will not run.
+
+> For a production deployment under sustained traffic, compile Tailwind to a
+> static stylesheet and self-host the libraries instead of using the Play CDN.
+
+---
+
+## The scroll-driven 3D layer (homepage only, currently disabled)
+
+**This layer is switched off.** Set `ENABLE_3D_HERO=True` to bring it back —
+the scene, its loader, the static fallback and the staging section all remain
+in the tree, and the `[data-scene]` anchors stay on the sections, so no
+template edit is needed. Everything below describes it as it behaves when
+enabled.
+
+A Three.js scene sits in a fixed canvas behind the homepage content (`z-0`,
+content at `z-10`), with five stages bound to the `[data-scene]` sections:
+
+| Section | Stage | What happens |
+| --- | --- | --- |
+| Hero | `press` | The press activates — rollers spin up, ink drips fall |
+| Services | `sheet` | A printed sheet peels off and cycles through shirt → banner → sticker |
+| Process | `cmyk` | Four ink planes separate and recombine while the camera orbits |
+| Testimonials | `showcase` | A printed panel floats and flips, catching the key light |
+| Stamp | `stamp` | The press stamps the logo, ink bursts, everything settles |
+
+Each stage owns a ScrollTrigger with `scrub`, so scroll position drives a
+normalised 0–1 progress that in turn drives rotation, camera, materials and
+particles. Triggers run **centre to centre** (`top center` → `bottom center`)
+so adjacent sections hand over cleanly at the viewport midline; exactly one
+stage group is ever visible, and only its update function runs.
+
+All geometry is procedural — the logo is the single texture the scene
+downloads — which keeps the polycount in the low thousands and the payload
+small.
+
+### It is progressive enhancement, not a dependency
+
+`inkpro3d-loader.js` is ~3KB and is the only `<script>` the page ships for this.
+It decides whether the device can afford the scene, and only then dynamically
+imports the Three.js bundle — **after** the `load` event and a
+`requestIdleCallback`. First paint of the hero and its quote CTA never waits on
+it. The scene is declined outright, leaving a static SVG illustration with CSS
+parallax in place, when any of these hold:
+
+- `prefers-reduced-motion: reduce`
+- Data Saver is on, or the connection reports 2G
+- `deviceMemory < 4` or `hardwareConcurrency < 4`
+- WebGL is unavailable, or the renderer is a software rasteriser
+  (SwiftShader/llvmpipe report as WebGL but crawl)
+
+Phones that do pass get a reduced budget: lower pixel-ratio cap, no
+antialiasing, fewer particles and coarser geometry. Rendering also stops
+entirely when the tab is hidden. A CDN failure is caught and leaves the page
+untouched.
+
+The existing GSAP scroll-reveals, stat counters and card animations are
+unchanged — this layer supplements them.
+
+> The canvas fades in to 65% opacity (45% on mobile) by design: it is scenery
+> behind the copy, not the subject of the page.
+
+---
+
+## Roles
+
+| Group | Access |
+| --- | --- |
+| `Customer` | Quote builder, own quote history only |
+| `Staff` | Quote review, register, dashboard. No user management |
+| `Owner` | Everything, including pricing and email template management |
+
+Run `manage.py bootstrap_groups` to create them. Staff views gate on
+`is_staff`, so superusers always get through; add owners to the `Owner` group
+**and** tick `is_staff` so they can reach the portal.
+
+---
+
+## Email
+
+All messages render a branded black/yellow HTML shell with a plain text
+alternative. The opening and closing paragraphs come from `EmailTemplate` rows,
+so the owner can reword them in the admin without a deploy; hard-coded defaults
+apply when a row is missing.
+
+Sent on:
+
+- **Quote submitted** — acknowledgement to the customer, alert to the team
+  (email, plus Slack if `SLACK_WEBHOOK_URL` is set).
+- **Approve & send** — the quote PDF with one-click accept/decline links.
+- **Overdue invoices** — a weekday-morning Celery Beat reminder.
+
+The default `EMAIL_BACKEND` prints to the console. Switch to SMTP in `.env` to
+send for real.
+
+---
+
+## Async and PDFs
+
+Both are optional dependencies, by design.
+
+**Celery** — with no `CELERY_BROKER_URL` set, `main/tasks.py` runs email and PDF
+work inline, so a fresh checkout works without Redis or a worker. Point the
+setting at a broker and the same call sites start dispatching asynchronously:
+
+```bash
+celery -A inkpro worker -l info
+celery -A inkpro beat -l info    # payment reminders
+```
+
+**WeasyPrint** — needs native cairo/pango libraries. When they are missing the
+quote still goes out: the customer gets the same branded document as an HTML
+attachment, and the "view online" link is unaffected. The Dockerfile installs
+the native stack, so PDFs work there.
+
+---
+
+## Configuration
+
+Everything is environment-driven via `django-environ`; see `.env.example`.
+SQLite is the zero-config default — set `DATABASE_URL` to a `postgres://` DSN to
+switch, with no code change. Key settings: `SECRET_KEY`, `DEBUG`,
+`ALLOWED_HOSTS`, `SITE_URL` (used to build the emailed quote links),
+`GST_RATE`, `QUOTE_VALID_DAYS`, `STAFF_NOTIFY_EMAILS`, `ENABLE_3D_HERO`.
+
+With `DEBUG=False`, SSL redirect, secure cookies and HSTS switch on
+automatically.
+
+---
+
+## Tests
+
+```bash
+python manage.py test main
+```
+
+106 tests covering the places where a silent mistake costs money: pricing
+arithmetic against the published rate card, quote status transitions including
+illegal ones, invoice balance and payment-status derivation, the guest wizard
+end to end, approve-and-send, access control, the dashboard API, the brand
+assets, the 3D layer's progressive-enhancement contract, the lightbox, and
+the seeded catalogue's fidelity to the printed rate card.
+
+---
+
+## Deployment
+
+```bash
+docker compose up --build
+```
+
+Brings up Postgres, Redis, Gunicorn, a Celery worker and Beat, running
+migrations and the rate card seed on boot. Set `SECRET_KEY`, `ALLOWED_HOSTS` and
+`SITE_URL` in the environment first. Put Nginx or your platform's load balancer
+in front for TLS; WhiteNoise serves static files, so no separate static host is
+required.
+
+---
+
+## Before going live
+
+- Run `build_logo_assets` to regenerate the logo assets from `assets/`.
+- Run `import_ratecard_images` against the rate card PDF.
+- Import the real register: `import_register "INKPRO Recharge Register 2026.xlsx"`.
+- Replace the placeholder contact details (`hello@inkpro.example`) in
+  `templates/main/contact.html`, the email footer and the quote PDF.
+- Add your NZBN and physical address to the quote PDF terms block.
+- Set a real `SECRET_KEY`, `DEBUG=False`, and a real `ALLOWED_HOSTS`.
+- Confirm the GST rate and the quote validity period.
+- Confirm the small-format sticker range (see "Product photography" note).
+- Swap the marketing-stat floors in `main/views.py:home` for real figures.
+- Replace the placeholder testimonials in `templates/main/home.html`.

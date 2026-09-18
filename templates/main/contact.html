@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Contact — InkPro{% endblock %}
+{% block content %}
+<section class="relative overflow-hidden ink-grid pb-20 pt-36">
+  <div class="absolute inset-0 halftone opacity-30"></div>
+  <div class="relative mx-auto grid max-w-6xl gap-12 px-4 sm:px-6 lg:grid-cols-2">
+    <div>
+      <span class="text-xs font-bold uppercase tracking-[0.3em] text-ink-yellow">Get in touch</span>
+      <h1 class="mt-4 font-display text-5xl leading-none sm:text-6xl">Let's talk<br>about your job.</h1>
+      <p class="mt-6 text-lg text-white/60">After a firm price? The <a href="{% url 'quote_builder' %}" class="font-bold text-ink-yellow underline underline-offset-4">quote builder</a> is faster — it prices your job live from our rate card.</p>
+
+      <dl class="mt-10 space-y-5 text-sm">
+        <div><dt class="text-xs font-bold uppercase tracking-widest text-white/40">Email</dt><dd class="mt-1 text-lg">hello@inkpro.example</dd></div>
+        <div><dt class="text-xs font-bold uppercase tracking-widest text-white/40">Hours</dt><dd class="mt-1 text-lg">Mon–Fri, 8am – 5pm</dd></div>
+        <div><dt class="text-xs font-bold uppercase tracking-widest text-white/40">Rush jobs</dt><dd class="mt-1 text-lg">Same-day available — ask us</dd></div>
+      </dl>
+    </div>
+
+    <form method="post" class="ink-card space-y-5 p-8">
+      {% csrf_token %}
+      {% for field in form %}
+      <div>
+        <label for="{{ field.id_for_label }}" class="mb-2 block text-xs font-bold uppercase tracking-widest text-white/50">{{ field.label }}</label>
+        {{ field }}
+        {% for error in field.errors %}<p class="mt-1 text-xs font-semibold text-red-400">{{ error }}</p>{% endfor %}
+      </div>
+      {% endfor %}
+      <button type="submit" class="ink-btn w-full justify-center">Send message</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

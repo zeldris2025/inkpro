@@ -1,0 +1,104 @@
+{% load humanize %}<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{{ quote.quote_number }}</title>
+<style>
+/* Standalone stylesheet: WeasyPrint renders this document with no access to
+   the site's CSS, and the same file doubles as the HTML fallback attachment. */
+@page { size: A4; margin: 16mm 14mm 20mm; @bottom-center { content: "InkPro · Think Ink, Think Pro · Page " counter(page) " of " counter(pages); font-size: 8pt; color: #a1a1aa; } }
+* { box-sizing: border-box; }
+body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #18181b; margin: 0; line-height: 1.5; }
+.header { background: #0A0A0A; color: #fff; padding: 18px 20px; border-radius: 8px; }
+.brand { font-size: 26pt; font-weight: 900; color: #FFD200; letter-spacing: -0.5pt; line-height: 1; }
+.tagline { font-size: 7pt; letter-spacing: 2.5pt; text-transform: uppercase; color: rgba(255,255,255,0.5); margin-top: 4px; }
+.rule { height: 3px; background: linear-gradient(90deg,#00AEEF,#EC008C,#FFD200); margin: 0 0 20px; border-radius: 2px; }
+h1 { font-size: 17pt; margin: 22px 0 3px; }
+.muted { color: #71717a; }
+.meta { width: 100%; margin: 14px 0 22px; border-collapse: collapse; }
+.meta td { vertical-align: top; padding: 0; width: 50%; font-size: 9pt; }
+.label { font-size: 7pt; font-weight: bold; letter-spacing: 1.2pt; text-transform: uppercase; color: #a1a1aa; margin-bottom: 3px; }
+table.items { width: 100%; border-collapse: collapse; margin-top: 6px; }
+table.items th { text-align: left; font-size: 7.5pt; letter-spacing: 1pt; text-transform: uppercase; color: #71717a; border-bottom: 1.5px solid #18181b; padding: 7px 8px; }
+table.items td { padding: 9px 8px; border-bottom: 1px solid #ededf0; vertical-align: top; }
+.right { text-align: right; }
+.sub { font-size: 8pt; color: #a1a1aa; margin-top: 2px; }
+table.totals { width: 48%; margin-left: 52%; margin-top: 14px; border-collapse: collapse; }
+table.totals td { padding: 4px 8px; font-size: 9.5pt; }
+table.totals tr.grand td { border-top: 2px solid #18181b; font-size: 13pt; font-weight: 900; padding-top: 9px; }
+.badge { display: inline-block; background: #FFD200; color: #000; font-size: 7.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 1pt; padding: 4px 11px; border-radius: 99px; }
+.notes { margin-top: 24px; padding: 12px 14px; background: #fafafa; border-left: 3px solid #FFD200; font-size: 9pt; }
+.terms { margin-top: 26px; padding-top: 12px; border-top: 1px solid #e4e4e7; font-size: 7.5pt; color: #a1a1aa; line-height: 1.6; }
+</style></head>
+<body>
+
+<div class="header">
+  {% if LOGO_URL %}
+  <img src="{{ LOGO_URL }}" alt="InkPro — Think Ink, Think Pro" style="height:52px;width:auto;display:block;">
+  {% else %}
+  <div class="brand">InkPro</div>
+  <div class="tagline">Think Ink, Think Pro</div>
+  {% endif %}
+</div>
+<div class="rule"></div>
+
+<h1>Quote {{ quote.quote_number }}</h1>
+<div class="muted" style="font-size:9pt;">
+  Issued {{ quote.sent_at|date:"j F Y"|default:quote.created_at|date:"j F Y" }}
+  {% if quote.valid_until %} · valid until {{ quote.valid_until|date:"j F Y" }}{% endif %}
+  {% if quote.is_urgent %} · <span class="badge">Rush job</span>{% endif %}
+</div>
+
+<table class="meta">
+  <tr>
+    <td>
+      <div class="label">Prepared for</div>
+      <strong>{{ quote.contact_name|default:"—" }}</strong><br>
+      {% if quote.customer.company_name %}{{ quote.customer.company_name }}<br>{% endif %}
+      {% if quote.contact_email %}{{ quote.contact_email }}<br>{% endif %}
+      {% if quote.contact_phone %}{{ quote.contact_phone }}{% endif %}
+    </td>
+    <td>
+      <div class="label">From</div>
+      <strong>InkPro</strong><br>
+      hello@inkpro.example<br>
+      {{ SITE_URL|default:"inkpro.example" }}
+    </td>
+  </tr>
+</table>
+
+<table class="items">
+  <thead><tr>
+    <th style="width:46%;">Description</th><th style="width:16%;">Size</th>
+    <th class="right" style="width:10%;">Qty</th><th class="right" style="width:14%;">Unit price</th><th class="right" style="width:14%;">Total</th>
+  </tr></thead>
+  <tbody>
+    {% for item in items %}
+    <tr>
+      <td><strong>{{ item.description }}</strong>{% if item.pricing_rule.notes %}<div class="sub">{{ item.pricing_rule.notes }}</div>{% endif %}</td>
+      <td>{{ item.size|default:"—" }}</td>
+      <td class="right">{{ item.quantity }}</td>
+      <td class="right">${{ item.unit_price|floatformat:2|intcomma }}</td>
+      <td class="right"><strong>${{ item.line_total|floatformat:2|intcomma }}</strong></td>
+    </tr>
+    {% empty %}<tr><td colspan="5" class="muted">No line items.</td></tr>{% endfor %}
+  </tbody>
+</table>
+
+<table class="totals">
+  <tr><td class="muted">Subtotal</td><td class="right">${{ quote.subtotal|floatformat:2|intcomma }}</td></tr>
+  {% if quote.discount %}<tr><td class="muted">Discount</td><td class="right">−${{ quote.discount|floatformat:2|intcomma }}</td></tr>{% endif %}
+  {% if quote.urgent_fee %}<tr><td class="muted">Urgency fee</td><td class="right">${{ quote.urgent_fee|floatformat:2|intcomma }}</td></tr>{% endif %}
+  <tr><td class="muted">GST</td><td class="right">${{ quote.gst_amount|floatformat:2|intcomma }}</td></tr>
+  <tr class="grand"><td>Total</td><td class="right">${{ quote.total|floatformat:2|intcomma }}</td></tr>
+</table>
+
+{% if quote.customer_notes %}
+<div class="notes"><div class="label">Your notes</div>{{ quote.customer_notes|linebreaksbr }}</div>
+{% endif %}
+
+<div class="terms">
+  <strong>Terms.</strong> All amounts are in Samoan Tala (WST). GST is included in the total as shown.
+  This quote is valid {% if quote.valid_until %}until {{ quote.valid_until|date:"j F Y" }}{% else %}for 30 days from the date of issue{% endif %}
+  and is subject to final artwork approval. Production begins once the quote is accepted and artwork is confirmed.
+  Rush and same-day work carries the urgency fee shown above.
+</div>
+
+</body></html>

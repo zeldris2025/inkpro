@@ -1,0 +1,116 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}Quote {{ quote.quote_number }} — InkPro{% endblock %}
+{% block content %}
+<section class="relative overflow-hidden ink-grid pb-24 pt-32">
+  <div class="absolute inset-0 halftone opacity-20"></div>
+  <div class="relative mx-auto max-w-4xl px-4 sm:px-6">
+
+    <div class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <span class="text-xs font-bold uppercase tracking-[0.3em] text-ink-yellow">Your quote</span>
+        <h1 class="mt-3 font-display text-4xl sm:text-5xl">{{ quote.quote_number }}</h1>
+        <p class="mt-2 text-white/55">Prepared for {{ quote.contact_name }}{% if quote.sent_at %} · {{ quote.sent_at|date:"j M Y" }}{% endif %}</p>
+      </div>
+      <div class="text-right">
+        <span class="inline-block rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest
+          {% if quote.status == 'ACCEPTED' %}bg-green-500/20 text-green-300
+          {% elif quote.status == 'DECLINED' %}bg-red-500/20 text-red-300
+          {% elif quote.is_expired %}bg-white/10 text-white/50
+          {% else %}bg-ink-yellow/20 text-ink-yellow{% endif %}">
+          {% if quote.is_expired and quote.status == 'SENT' %}Expired{% else %}{{ quote.get_status_display }}{% endif %}
+        </span>
+        {% if quote.valid_until %}<p class="mt-2 text-xs text-white/40">Valid until {{ quote.valid_until|date:"j M Y" }}</p>{% endif %}
+      </div>
+    </div>
+
+    <div class="ink-card mt-10 overflow-hidden">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-white/5 text-xs uppercase tracking-wider text-white/45">
+          <tr>
+            <th class="px-5 py-3 font-bold">Item</th>
+            <th class="px-5 py-3 text-right font-bold">Qty</th>
+            <th class="px-5 py-3 text-right font-bold">Unit</th>
+            <th class="px-5 py-3 text-right font-bold">Total</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-white/5">
+          {% for item in items %}
+          <tr>
+            <td class="px-5 py-4">
+              <div class="font-semibold">{{ item.description }}</div>
+              {% if item.size %}<div class="text-xs text-white/40">{{ item.size }}</div>{% endif %}
+            </td>
+            <td class="px-5 py-4 text-right tabular">{{ item.quantity }}</td>
+            <td class="px-5 py-4 text-right tabular text-white/60">${{ item.unit_price|floatformat:2|intcomma }}</td>
+            <td class="px-5 py-4 text-right font-bold tabular">${{ item.line_total|floatformat:2|intcomma }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot class="border-t border-white/10 text-sm">
+          <tr><td colspan="3" class="px-5 pt-4 text-right text-white/55">Subtotal</td><td class="px-5 pt-4 text-right tabular">${{ quote.subtotal|floatformat:2|intcomma }}</td></tr>
+          {% if quote.discount %}<tr><td colspan="3" class="px-5 py-1 text-right text-green-400">Discount</td><td class="px-5 py-1 text-right tabular text-green-400">−${{ quote.discount|floatformat:2|intcomma }}</td></tr>{% endif %}
+          {% if quote.urgent_fee %}<tr><td colspan="3" class="px-5 py-1 text-right text-ink-magenta">Urgency fee</td><td class="px-5 py-1 text-right tabular text-ink-magenta">${{ quote.urgent_fee|floatformat:2|intcomma }}</td></tr>{% endif %}
+          <tr><td colspan="3" class="px-5 py-1 text-right text-white/55">GST ({{ GST_RATE_PCT }}%)</td><td class="px-5 py-1 text-right tabular">${{ quote.gst_amount|floatformat:2|intcomma }}</td></tr>
+          <tr class="border-t border-white/15">
+            <td colspan="3" class="px-5 py-4 text-right font-display text-lg">Total</td>
+            <td class="px-5 py-4 text-right font-display text-2xl text-ink-yellow tabular">${{ quote.total|floatformat:2|intcomma }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    {% if quote.customer_notes %}
+    <div class="mt-6 rounded-xl border border-white/10 bg-white/5 p-5 text-sm">
+      <div class="text-xs font-bold uppercase tracking-widest text-white/40">Your notes</div>
+      <p class="mt-2 text-white/70">{{ quote.customer_notes|linebreaksbr }}</p>
+    </div>
+    {% endif %}
+
+    {% if quote.awaiting_customer %}
+    <div class="mt-10 grid gap-4 sm:grid-cols-2" x-data="{ declining: false }">
+      <form method="post" action="{% url 'public_quote_respond' quote.access_token %}">
+        {% csrf_token %}
+        <input type="hidden" name="decision" value="accept">
+        <button type="submit" class="ink-btn w-full justify-center py-4 text-base">✓ Accept this quote</button>
+      </form>
+
+      <div>
+        <button @click="declining = !declining" class="ink-btn-ghost w-full justify-center py-4">Decline</button>
+        <form x-show="declining" x-cloak x-transition method="post" action="{% url 'public_quote_respond' quote.access_token %}" class="mt-3 space-y-3">
+          {% csrf_token %}
+          <input type="hidden" name="decision" value="decline">
+          <textarea name="reason" rows="3" placeholder="Anything we could have done differently? (optional)"
+                    class="w-full rounded-lg border border-white/15 bg-black/40 px-4 py-3 text-sm text-white placeholder-white/35 focus:border-ink-yellow focus:outline-none"></textarea>
+          <button type="submit" class="w-full rounded-full border border-red-400/40 px-5 py-3 text-sm font-bold text-red-300 transition hover:bg-red-500/10">Confirm decline</button>
+        </form>
+      </div>
+    </div>
+    <p class="mt-5 text-center text-sm text-white/40">Accepting gets us straight onto the job. Questions first? Just reply to the email.</p>
+
+    {% elif quote.status == 'ACCEPTED' %}
+    <div class="mt-10 rounded-xl border border-green-400/30 bg-green-500/10 p-6 text-center">
+      <p class="font-display text-xl text-green-300">Accepted — we're on it.</p>
+      <p class="mt-2 text-sm text-white/60">We'll be in touch with timing. Thanks for choosing InkPro.</p>
+    </div>
+
+    {% elif quote.status == 'DECLINED' %}
+    <div class="mt-10 rounded-xl border border-white/15 bg-white/5 p-6 text-center">
+      <p class="font-display text-xl">Quote declined.</p>
+      <p class="mt-2 text-sm text-white/60">No problem — get in touch any time if things change.</p>
+    </div>
+
+    {% elif quote.is_expired %}
+    <div class="mt-10 rounded-xl border border-white/15 bg-white/5 p-6 text-center">
+      <p class="font-display text-xl">This quote has expired.</p>
+      <a href="{% url 'contact' %}" class="ink-btn mt-4">Ask us to re-quote</a>
+    </div>
+    {% endif %}
+
+    {% if quote.pdf_file %}
+    <div class="mt-8 text-center">
+      <a href="{{ quote.pdf_file.url }}" class="text-sm font-bold text-white/50 underline underline-offset-4 transition hover:text-ink-yellow">Download a copy</a>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

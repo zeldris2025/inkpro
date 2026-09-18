@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}Quote request received — InkPro{% endblock %}
+{% block content %}
+<section class="relative flex min-h-screen items-center overflow-hidden ink-grid pt-28">
+  <div class="absolute inset-0 halftone opacity-25"></div>
+  <div class="relative mx-auto max-w-2xl px-4 py-20 text-center sm:px-6">
+    <div class="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-ink-yellow text-4xl">✓</div>
+    <h1 class="mt-8 font-display text-4xl leading-tight sm:text-5xl">Got it — thanks{% if quote.contact_name %}, {{ quote.contact_name }}{% endif %}.</h1>
+    <p class="mt-5 text-lg text-white/65">Your request is with our team. We'll check the details and email a firm quote{% if quote.contact_email %} to <strong class="text-white">{{ quote.contact_email }}</strong>{% endif %}.</p>
+
+    <div class="ink-card mx-auto mt-10 max-w-sm p-6 text-left">
+      <dl class="space-y-3 text-sm">
+        <div class="flex justify-between"><dt class="text-white/50">Reference</dt><dd class="font-bold text-ink-yellow">{{ quote.quote_number }}</dd></div>
+        <div class="flex justify-between"><dt class="text-white/50">Items</dt><dd class="font-bold">{{ quote.items.count }}</dd></div>
+        <div class="flex justify-between"><dt class="text-white/50">Indicative total</dt><dd class="font-bold tabular">${{ quote.total|floatformat:2|intcomma }}</dd></div>
+        {% if quote.is_urgent %}<div class="flex justify-between"><dt class="text-white/50">Urgency</dt><dd class="font-bold text-ink-magenta">Rush requested</dd></div>{% endif %}
+      </dl>
+    </div>
+
+    <div class="mt-10 flex flex-wrap justify-center gap-3">
+      <a href="{% url 'home' %}" class="ink-btn">Back to home</a>
+      {% if user.is_authenticated %}<a href="{% url 'my_quotes' %}" class="ink-btn-ghost">Track my quotes</a>
+      {% else %}<a href="{% url 'signup' %}" class="ink-btn-ghost">Create an account to track it</a>{% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

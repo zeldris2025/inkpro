@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Gallery — InkPro{% endblock %}
+{% block content %}
+<section class="relative overflow-hidden ink-grid pb-12 pt-36">
+  <div class="absolute inset-0 halftone opacity-30"></div>
+  <div class="relative mx-auto max-w-7xl px-4 sm:px-6">
+    <span class="text-xs font-bold uppercase tracking-[0.3em] text-ink-yellow">Portfolio</span>
+    <h1 class="mt-4 font-display text-5xl leading-none sm:text-7xl">Work off the press.</h1>
+    <p class="mt-6 max-w-2xl text-white/60">A cross-section of recent jobs. Drop your own artwork into the quote builder and we'll tell you exactly what it costs.</p>
+  </div>
+</section>
+
+{% comment %}Portfolio masonry, built from the service photography imported
+from the rate card. Filterable by category, with a lightbox.{% endcomment %}
+<section class="pb-24" x-data="{ open: false, current: null }">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6">
+
+    <div class="mb-8 flex flex-wrap gap-2">
+      <a href="{% url 'gallery' %}"
+         class="rounded-full px-4 py-2 text-xs font-bold uppercase tracking-widest transition {% if not active_slug %}bg-ink-yellow text-black{% else %}border border-white/15 text-white/60 hover:text-white{% endif %}">All work</a>
+      {% for category in categories %}
+        {% if category.images.all %}
+        <a href="?category={{ category.slug }}"
+           class="rounded-full px-4 py-2 text-xs font-bold uppercase tracking-widest transition {% if active_slug == category.slug %}bg-ink-yellow text-black{% else %}border border-white/15 text-white/60 hover:text-white{% endif %}">{{ category.name }}</a>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <div data-reveal-group class="columns-1 gap-5 sm:columns-2 lg:columns-3 [&>*]:mb-5">
+      {% for image in images %}
+      <button type="button"
+              @click="current = { src: '{{ image.image.url }}', caption: '{{ image.caption|default:image.description|escapejs }}', category: '{{ image.category.name|escapejs }}' }; open = true"
+              class="reveal ink-card group block w-full break-inside-avoid overflow-hidden text-left"
+              aria-label="Enlarge: {{ image.description }}">
+        <div class="relative overflow-hidden">
+          <img src="{{ image.image.url }}" alt="{{ image.description }}" loading="lazy"
+               class="w-full transition duration-500 group-hover:scale-[1.03]">
+          <span class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition group-hover:opacity-100">
+            <svg class="h-7 w-7 text-ink-yellow" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14zM11 8v6M8 11h6"/>
+            </svg>
+          </span>
+        </div>
+        <div class="p-5">
+          <span class="text-[10px] font-bold uppercase tracking-widest text-ink-yellow">{{ image.category.name }}</span>
+          {% if image.caption %}<h3 class="mt-1 text-sm text-white/70">{{ image.caption }}</h3>{% endif %}
+        </div>
+      </button>
+      {% empty %}
+      <p class="col-span-full py-20 text-center text-white/40">
+        No photos yet — run <code class="rounded bg-white/10 px-2 py-0.5 text-xs">manage.py import_ratecard_images</code>.
+      </p>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% include "main/partials/_lightbox.html" %}
+</section>
+{% endblock %}

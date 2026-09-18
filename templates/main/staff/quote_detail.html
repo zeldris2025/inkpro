@@ -1,0 +1,171 @@
+{% extends "main/staff/base_staff.html" %}{% load humanize %}
+{% block staff_title %}{{ quote.quote_number }}{% endblock %}
+{% block staff_content %}
+<a href="{% url 'staff_quote_inbox' %}" class="text-sm font-semibold text-white/50 transition hover:text-ink-yellow">← Quote inbox</a>
+
+<div class="mt-5 flex flex-wrap items-start justify-between gap-5">
+  <div>
+    <h1 class="font-display text-3xl">{{ quote.quote_number }}
+      {% if quote.is_urgent %}<span class="ml-3 rounded-full bg-ink-magenta/25 px-3 py-1 align-middle text-xs font-bold uppercase tracking-widest text-ink-magenta">Rush job</span>{% endif %}
+    </h1>
+    <p class="mt-2 text-sm text-white/50">
+      {{ quote.contact_name|default:"Guest" }} · {{ quote.contact_email|default:"no email" }}{% if quote.contact_phone %} · {{ quote.contact_phone }}{% endif %}
+    </p>
+    <p class="mt-1 text-xs text-white/35">
+      Submitted {{ quote.submitted_at|date:"j M Y, g:ia"|default:"—" }}
+      {% if quote.reviewed_by %}· reviewed by {{ quote.reviewed_by.username }}{% endif %}
+      {% if quote.sent_at %}· sent {{ quote.sent_at|date:"j M Y" }}{% endif %}
+    </p>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-3">
+    <span class="rounded-full bg-white/10 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">{{ quote.get_status_display }}</span>
+    <a href="{% url 'staff_quote_pdf' quote.pk %}" target="_blank" class="ink-btn-ghost text-xs">Preview PDF</a>
+    <a href="{{ quote.public_url }}" target="_blank" class="ink-btn-ghost text-xs">Customer view</a>
+  </div>
+</div>
+
+{% if not quote.is_editable_by_staff %}
+<div class="mt-6 rounded-xl border border-white/15 bg-white/5 p-4 text-sm text-white/60">
+  This quote has been {{ quote.get_status_display|lower }} by the customer and can no longer be edited.
+</div>
+{% endif %}
+
+<div class="mt-7 grid gap-6 lg:grid-cols-3">
+  <!-- Line items + money -->
+  <div class="lg:col-span-2">
+    <form method="post" class="rounded-xl border border-white/10 bg-white p-6 text-zinc-900">
+      {% csrf_token %}
+      {{ formset.management_form }}
+      <h2 class="font-display text-lg">Line items</h2>
+      <p class="text-xs text-zinc-500">Edit descriptions and prices freely — totals recalculate on save.</p>
+
+      <div class="mt-5 overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="text-xs uppercase tracking-wider text-zinc-500">
+            <tr><th class="pb-2 pr-3">Description</th><th class="pb-2 pr-3">Size</th><th class="pb-2 pr-3 w-20">Qty</th><th class="pb-2 pr-3 w-28">Unit $</th><th class="pb-2 pr-3 text-right">Line</th><th class="pb-2 w-12"></th></tr>
+          </thead>
+          <tbody class="divide-y divide-zinc-100">
+            {% for item_form in formset %}
+            <tr>
+              {{ item_form.id }}
+              <td class="py-2 pr-3">{{ item_form.description }}
+                {% if item_form.instance.added_by_staff %}<span class="mt-1 inline-block rounded bg-ink-cyan/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-sky-700">Staff added</span>{% endif %}
+                {% if item_form.instance.artwork %}<a href="{{ item_form.instance.artwork.url }}" target="_blank" class="mt-1 block text-xs font-bold text-sky-600 hover:underline">📎 Artwork</a>{% endif %}
+              </td>
+              <td class="py-2 pr-3">{{ item_form.size }}</td>
+              <td class="py-2 pr-3">{{ item_form.quantity }}</td>
+              <td class="py-2 pr-3">{{ item_form.unit_price }}</td>
+              <td class="py-2 pr-3 text-right font-bold tabular">${{ item_form.instance.line_total|floatformat:2|intcomma }}</td>
+              <td class="py-2 text-center">{{ item_form.DELETE }}</td>
+            </tr>
+            {% empty %}<tr><td colspan="6" class="py-8 text-center text-zinc-400">No line items.</td></tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="mt-8 font-display text-lg">Adjustments</h2>
+      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        {% for field in form %}
+        <div class="{% if field.name == 'staff_notes' %}sm:col-span-2{% endif %}">
+          <label for="{{ field.id_for_label }}" class="mb-1.5 block text-xs font-bold uppercase tracking-widest text-zinc-500">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<p class="mt-1 text-xs text-zinc-400">{{ field.help_text }}</p>{% endif %}
+          {% for error in field.errors %}<p class="mt-1 text-xs font-semibold text-red-600">{{ error }}</p>{% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+
+      <button type="submit" name="save_quote" class="ink-btn mt-6">Save changes</button>
+    </form>
+
+    <!-- Staff-added line -->
+    <form method="post" action="{% url 'staff_quote_add_item' quote.pk %}" class="mt-5 rounded-xl border border-white/10 bg-white p-6 text-zinc-900">
+      {% csrf_token %}
+      <h2 class="font-display text-lg">Add a line</h2>
+      <p class="text-xs text-zinc-500">For adjustments, extras or anything the customer couldn't configure themselves.</p>
+      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        {% for field in add_form %}
+        <div><label for="{{ field.id_for_label }}" class="mb-1.5 block text-xs font-bold uppercase tracking-widest text-zinc-500">{{ field.label }}</label>{{ field }}</div>
+        {% endfor %}
+      </div>
+      <button type="submit" class="ink-btn-ghost mt-5 border-zinc-300 text-zinc-800 hover:border-ink-yellow hover:text-zinc-900">Add line</button>
+    </form>
+  </div>
+
+  <!-- Sidebar: totals, workflow, notes -->
+  <div class="space-y-5">
+    <div class="rounded-xl border border-white/10 bg-white/5 p-6">
+      <h2 class="font-display text-lg">Totals</h2>
+      <dl class="mt-4 space-y-2 text-sm">
+        <div class="flex justify-between text-white/55"><dt>Subtotal</dt><dd class="tabular">${{ quote.subtotal|floatformat:2|intcomma }}</dd></div>
+        {% if quote.discount %}<div class="flex justify-between text-green-400"><dt>Discount</dt><dd class="tabular">−${{ quote.discount|floatformat:2|intcomma }}</dd></div>{% endif %}
+        {% if quote.urgent_fee %}<div class="flex justify-between text-ink-magenta"><dt>Urgency fee</dt><dd class="tabular">${{ quote.urgent_fee|floatformat:2|intcomma }}</dd></div>{% endif %}
+        <div class="flex justify-between text-white/55"><dt>GST ({{ GST_RATE_PCT }}%)</dt><dd class="tabular">${{ quote.gst_amount|floatformat:2|intcomma }}</dd></div>
+        <div class="flex items-baseline justify-between border-t border-white/15 pt-3">
+          <dt class="font-display">Total</dt><dd class="font-display text-2xl text-ink-yellow tabular">${{ quote.total|floatformat:2|intcomma }}</dd>
+        </div>
+        {% if quote.total_override is not None %}<p class="text-xs font-bold text-ink-cyan">Manual override in effect.</p>{% endif %}
+      </dl>
+    </div>
+
+    <div class="rounded-xl border border-ink-yellow/30 bg-ink-yellow/5 p-6">
+      <h2 class="font-display text-lg">Workflow</h2>
+      {% if quote.status in 'SUBMITTED IN_REVIEW REVISED APPROVED' %}
+      <form method="post" action="{% url 'staff_quote_transition' quote.pk %}" class="mt-4">
+        {% csrf_token %}
+        <input type="hidden" name="status" value="APPROVE_AND_SEND">
+        <button type="submit" class="ink-btn w-full justify-center py-3.5 text-base"
+                {% if not quote.contact_email %}disabled title="No customer email on this quote"{% endif %}>
+          ✓ Approve &amp; send
+        </button>
+      </form>
+      <p class="mt-3 text-xs leading-relaxed text-white/50">
+        Generates the branded PDF, emails it to {{ quote.contact_email|default:"the customer" }} with one-click
+        accept/decline links, and moves the quote to Sent.
+      </p>
+      {% endif %}
+
+      <div class="mt-5 space-y-2 border-t border-white/10 pt-5">
+        <p class="text-xs font-bold uppercase tracking-widest text-white/40">Move to</p>
+        <div class="flex flex-wrap gap-2">
+          {% for value, label in allowed_transitions %}
+            <form method="post" action="{% url 'staff_quote_transition' quote.pk %}" class="inline">
+              {% csrf_token %}<input type="hidden" name="status" value="{{ value }}">
+              <button type="submit" class="rounded-full border border-white/15 px-3 py-1.5 text-xs font-bold transition hover:border-ink-yellow hover:text-ink-yellow">{{ label }}</button>
+            </form>
+          {% empty %}
+            <p class="text-xs text-white/35">No further moves available from {{ quote.get_status_display|lower }}.</p>
+          {% endfor %}
+        </div>
+        <p class="pt-1 text-xs text-white/35">Illegal moves are rejected — the quote can only follow the workflow.</p>
+      </div>
+    </div>
+
+    {% if quote.customer_notes %}
+    <div class="rounded-xl border border-white/10 bg-white/5 p-6">
+      <h2 class="text-xs font-bold uppercase tracking-widest text-white/40">Customer notes</h2>
+      <p class="mt-3 text-sm text-white/75">{{ quote.customer_notes|linebreaksbr }}</p>
+    </div>
+    {% endif %}
+
+    {% if quote.decline_reason %}
+    <div class="rounded-xl border border-red-400/30 bg-red-500/10 p-6">
+      <h2 class="text-xs font-bold uppercase tracking-widest text-red-300/70">Decline reason</h2>
+      <p class="mt-3 text-sm text-red-100">{{ quote.decline_reason|linebreaksbr }}</p>
+    </div>
+    {% endif %}
+
+    {% if quote.invoices.exists %}
+    <div class="rounded-xl border border-green-400/30 bg-green-500/10 p-6">
+      <h2 class="text-xs font-bold uppercase tracking-widest text-green-300/70">Register entries</h2>
+      <ul class="mt-3 space-y-2 text-sm">
+        {% for invoice in quote.invoices.all %}
+        <li class="flex justify-between"><a href="{% url 'staff_invoice_edit' invoice.pk %}" class="font-bold text-green-200 hover:underline">{{ invoice.invoice_no|default:"Draft entry" }}</a><span class="tabular">${{ invoice.invoice_amount|floatformat:2|intcomma }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

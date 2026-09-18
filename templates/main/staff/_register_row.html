@@ -1,0 +1,62 @@
+{% load humanize %}
+{% comment %}
+One register row. The money/reference cells are contenteditable and post
+themselves back through HTMX on blur, which swaps this same partial back in
+with the recalculated balance and status.
+{% endcomment %}
+<tr id="invoice-row-{{ invoice.pk }}" class="transition hover:bg-white/5 {% if invoice.is_overdue %}bg-red-500/5{% endif %}">
+  <td class="whitespace-nowrap px-3 py-2.5 text-white/60">{{ invoice.date|date:"j M y"|default:"—" }}</td>
+  <td class="px-3 py-2.5 font-semibold">
+    {{ invoice.client }}
+    {% if invoice.is_overdue %}<span class="ml-2 rounded bg-red-500/25 px-1.5 py-0.5 text-[10px] font-bold uppercase text-red-300">Overdue</span>{% endif %}
+  </td>
+  <td class="max-w-xs px-3 py-2.5 text-white/60"
+      contenteditable="true"
+      hx-post="{% url 'staff_invoice_inline' invoice.pk %}" hx-trigger="blur"
+      hx-vals='js:{field: "job_details", value: event.target.innerText.trim()}'
+      hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+      hx-target="#invoice-row-{{ invoice.pk }}" hx-swap="outerHTML"
+      >{{ invoice.job_details }}</td>
+  <td class="px-3 py-2.5 text-right tabular"
+      contenteditable="true"
+      hx-post="{% url 'staff_invoice_inline' invoice.pk %}" hx-trigger="blur"
+      hx-vals='js:{field: "qty", value: event.target.innerText.trim()}'
+      hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+      hx-target="#invoice-row-{{ invoice.pk }}" hx-swap="outerHTML"
+      >{{ invoice.qty }}</td>
+  <td class="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-white/70">{{ invoice.invoice_no|default:"—" }}</td>
+  <td class="px-3 py-2.5 text-right font-bold tabular"
+      contenteditable="true"
+      hx-post="{% url 'staff_invoice_inline' invoice.pk %}" hx-trigger="blur"
+      hx-vals='js:{field: "invoice_amount", value: event.target.innerText.replace(/[$,]/g, "").trim()}'
+      hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+      hx-target="#invoice-row-{{ invoice.pk }}" hx-swap="outerHTML"
+      >{{ invoice.invoice_amount|floatformat:2 }}</td>
+  <td class="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-white/60"
+      contenteditable="true"
+      hx-post="{% url 'staff_invoice_inline' invoice.pk %}" hx-trigger="blur"
+      hx-vals='js:{field: "receipt_no", value: event.target.innerText.trim()}'
+      hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+      hx-target="#invoice-row-{{ invoice.pk }}" hx-swap="outerHTML"
+      >{{ invoice.receipt_no|default:"—" }}</td>
+  <td class="px-3 py-2.5 text-right font-bold tabular text-green-400"
+      contenteditable="true"
+      hx-post="{% url 'staff_invoice_inline' invoice.pk %}" hx-trigger="blur"
+      hx-vals='js:{field: "amount_received", value: event.target.innerText.replace(/[$,]/g, "").trim()}'
+      hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+      hx-target="#invoice-row-{{ invoice.pk }}" hx-swap="outerHTML"
+      >{{ invoice.amount_received|floatformat:2 }}</td>
+  <td class="px-3 py-2.5 text-right font-bold tabular {% if invoice.balance > 0 %}text-ink-magenta{% else %}text-white/40{% endif %}">{{ invoice.balance|floatformat:2 }}</td>
+  <td class="whitespace-nowrap px-3 py-2.5">
+    <span class="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider
+      {% if invoice.payment_status == 'PAID' %}bg-green-500/20 text-green-300
+      {% elif invoice.payment_status == 'PARTIAL' %}bg-ink-yellow/20 text-ink-yellow
+      {% elif invoice.payment_status == 'TBC' %}bg-white/10 text-white/50
+      {% else %}bg-red-500/20 text-red-300{% endif %}">{{ invoice.get_payment_status_display }}</span>
+  </td>
+  <td class="whitespace-nowrap px-3 py-2.5 text-xs text-white/50">{{ invoice.get_payment_method_display }}</td>
+  <td class="max-w-[180px] truncate px-3 py-2.5 text-xs text-white/40">{{ invoice.notes }}</td>
+  <td class="whitespace-nowrap px-3 py-2.5 text-right">
+    <a href="{% url 'staff_invoice_edit' invoice.pk %}" class="text-xs font-bold text-ink-yellow hover:underline">Edit</a>
+  </td>
+</tr>

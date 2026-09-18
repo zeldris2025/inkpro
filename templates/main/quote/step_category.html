@@ -1,0 +1,41 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}Get a quote — InkPro{% endblock %}
+{% block content %}
+<section class="relative overflow-hidden ink-grid pb-24 pt-32">
+  <div class="absolute inset-0 halftone opacity-20"></div>
+  <div class="relative mx-auto max-w-7xl px-4 sm:px-6">
+    {% include "main/quote/_progress.html" with step=1 %}
+
+    <div class="grid gap-8 lg:grid-cols-3">
+      <div class="lg:col-span-2">
+        <h1 class="font-display text-4xl leading-tight sm:text-5xl">What are we printing?</h1>
+        <p class="mt-3 text-white/60">Pick a service to start. You can add as many different items as you like to one quote.</p>
+
+        <div data-reveal-group class="mt-9 grid gap-4 sm:grid-cols-2">
+          {% for category in categories %}
+          <a href="{% url 'quote_configure' category.slug %}" class="ink-card reveal group flex flex-col overflow-hidden">
+            {% if category.card_image %}
+            <div class="aspect-[16/9] overflow-hidden bg-white/5">
+              <img src="{{ category.card_image.url }}" alt="{{ category.name }}" loading="lazy"
+                   class="h-full w-full object-cover transition duration-500 group-hover:scale-105">
+            </div>
+            {% endif %}
+            <div class="flex flex-1 flex-col p-6">
+            <h2 class="font-display text-lg leading-tight">{{ category.name }}</h2>
+            <p class="mt-2 flex-1 text-sm text-white/50">{{ category.description|truncatewords:14 }}</p>
+            {% if category.price_from %}
+            <div class="mt-4 text-sm font-bold text-ink-yellow tabular">From ${{ category.price_from|floatformat:2|intcomma }}</div>
+            {% endif %}
+            </div>
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+
+      <aside class="lg:col-span-1">
+        <div id="quote-summary" class="sticky top-24">{% include "main/quote/_summary.html" %}</div>
+      </aside>
+    </div>
+  </div>
+</section>
+{% endblock %}

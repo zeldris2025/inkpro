@@ -1,0 +1,59 @@
+{% extends "main/staff/base_staff.html" %}{% load humanize %}
+{% block staff_title %}Recharge Register{% endblock %}
+{% block staff_content %}
+<div class="flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-3xl">Recharge Register</h1>
+    <p class="mt-1 text-sm text-white/45">{{ count|intcomma }} entr{{ count|pluralize:"y,ies" }}. Click any highlighted cell to edit it in place.</p>
+  </div>
+  <div class="flex flex-wrap gap-3">
+    <a href="?{% if search %}q={{ search }}&{% endif %}{% if status %}status={{ status }}&{% endif %}{% if method %}method={{ method }}&{% endif %}export=csv" class="ink-btn-ghost">Export CSV</a>
+    <a href="{% url 'staff_invoice_new' %}" class="ink-btn">New entry</a>
+  </div>
+</div>
+
+<div class="mt-6 grid gap-4 sm:grid-cols-3">
+  <div class="rounded-xl border border-white/10 bg-white/5 p-5">
+    <div class="text-xs font-bold uppercase tracking-widest text-white/40">Invoiced (filtered)</div>
+    <div class="mt-2 font-display text-2xl tabular">${{ totals.invoiced|default:0|floatformat:2|intcomma }}</div>
+  </div>
+  <div class="rounded-xl border border-green-400/20 bg-green-500/10 p-5">
+    <div class="text-xs font-bold uppercase tracking-widest text-green-300/70">Received</div>
+    <div class="mt-2 font-display text-2xl text-green-300 tabular">${{ totals.received|default:0|floatformat:2|intcomma }}</div>
+  </div>
+  <div class="rounded-xl border border-ink-magenta/25 bg-ink-magenta/10 p-5">
+    <div class="text-xs font-bold uppercase tracking-widest text-ink-magenta/80">Balance</div>
+    <div class="mt-2 font-display text-2xl text-ink-magenta tabular">${{ totals.balance|default:0|floatformat:2|intcomma }}</div>
+  </div>
+</div>
+
+<form method="get" class="mt-6 flex flex-wrap gap-3">
+  <input type="search" name="q" value="{{ search }}" placeholder="Search client, invoice no., job…"
+         class="min-w-[240px] flex-1 rounded-lg border border-white/15 bg-black px-4 py-2.5 text-sm text-white placeholder-white/35 focus:border-ink-yellow focus:outline-none">
+  <select name="status" class="rounded-lg border border-white/15 bg-black px-4 py-2.5 text-sm text-white focus:border-ink-yellow focus:outline-none">
+    <option value="">All statuses</option>
+    {% for value, label in statuses %}<option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="method" class="rounded-lg border border-white/15 bg-black px-4 py-2.5 text-sm text-white focus:border-ink-yellow focus:outline-none">
+    <option value="">All methods</option>
+    {% for value, label in methods %}<option value="{{ value }}" {% if method == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <button type="submit" class="ink-btn">Filter</button>
+  {% if search or status or method %}<a href="{% url 'staff_register' %}" class="ink-btn-ghost">Clear</a>{% endif %}
+</form>
+
+<div class="mt-6 overflow-x-auto rounded-xl border border-white/10">
+  <table class="w-full min-w-[1100px] text-left text-sm">
+    <thead class="bg-white/5 text-xs uppercase tracking-wider text-white/45">
+      <tr>{% for key, label in columns %}<th class="whitespace-nowrap px-3 py-3 font-bold {% if key in 'invoice_amount amount_received balance qty' %}text-right{% endif %}">{{ label }}</th>{% endfor %}<th class="px-3 py-3"></th></tr>
+    </thead>
+    <tbody class="divide-y divide-white/5">
+      {% for invoice in invoices %}{% include "main/staff/_register_row.html" %}{% empty %}
+      <tr><td colspan="13" class="px-4 py-14 text-center text-white/40">
+        No entries yet. Import the spreadsheet with <code class="rounded bg-white/10 px-2 py-0.5 text-xs">manage.py import_register &lt;file.xlsx&gt;</code> or add one manually.
+      </td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if count > 500 %}<p class="mt-4 text-center text-xs text-white/35">Showing the first 500 of {{ count|intcomma }} entries — narrow the filters to see more.</p>{% endif %}
+{% endblock %}
