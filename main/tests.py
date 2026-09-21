@@ -1341,3 +1341,58 @@ class SignupDuplicationTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(User.objects.filter(username='bob').exists())
         self.assertTrue(Customer.objects.filter(user__username='bob').exists())
+
+
+class QuoteDocumentTests(TestCase):
+    """The quote PDF is a plain white letterhead with the mark centred."""
+
+    def setUp(self):
+        category = ServiceCategory.objects.create(name='Stickers', slug='stickers')
+        rule = PricingRule.objects.create(
+            category=category, name='Labels', base_price=Decimal('5'), min_qty=10
+        )
+        self.quote = Quote.objects.create(
+            guest_name='Ada Lovelace', guest_email='ada@example.com', status=Quote.SENT
+        )
+        QuoteItem.objects.create(
+            quote=self.quote, category=category, pricing_rule=rule,
+            description='Stickers — Labels', quantity=10, unit_price=Decimal('5'),
+        )
+        self.quote.recalculate()
+
+    def html(self):
+        from main.pdf import render_quote_html
+
+        return render_quote_html(self.quote)
+
+    def test_there_is_no_dark_panel_or_colour_bar(self):
+        """The old letterhead put the logo on a black block with a CMYK rule
+        beneath it. The logo artwork used here has a black splat and a black
+        tagline, so both vanished into that panel — it read as a black bar."""
+        markup = self.html()
+        self.assertNotIn('#0A0A0A', markup)
+        self.assertNotIn('linear-gradient', markup)
+        self.assertNotIn('class="rule"', markup)
+
+    def test_the_mark_is_centred_on_white(self):
+        markup = self.html()
+        self.assertIn('.header { text-align: center;', markup)
+        self.assertIn('inkpro-logo.png', markup)
+        # The light-background artwork, not the white-on-dark variant.
+        self.assertNotIn('inkpro-logo-on-dark.png', markup)
+
+    def test_the_document_still_carries_its_figures(self):
+        markup = self.html()
+        for expected in (self.quote.quote_number, 'Ada Lovelace', '50.00', '57.50',
+                         'Samoan Tala (WST)'):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, markup)
+
+    def test_it_renders_to_a_real_pdf(self):
+        from main.pdf import render_quote_pdf
+
+        filename, content, mimetype = render_quote_pdf(self.quote)
+        self.assertTrue(filename.endswith(('.pdf', '.html')))
+        self.assertGreater(len(content), 1000)
+        if mimetype == 'application/pdf':
+            self.assertTrue(content.startswith(b'%PDF'))

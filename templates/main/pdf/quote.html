@@ -6,11 +6,15 @@
 @page { size: A4; margin: 16mm 14mm 20mm; @bottom-center { content: "InkPro · Think Ink, Think Pro · Page " counter(page) " of " counter(pages); font-size: 8pt; color: #a1a1aa; } }
 * { box-sizing: border-box; }
 body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #18181b; margin: 0; line-height: 1.5; }
-.header { background: #0A0A0A; color: #fff; padding: 18px 20px; border-radius: 8px; }
-.brand { font-size: 26pt; font-weight: 900; color: #FFD200; letter-spacing: -0.5pt; line-height: 1; }
-.tagline { font-size: 7pt; letter-spacing: 2.5pt; text-transform: uppercase; color: rgba(255,255,255,0.5); margin-top: 4px; }
-.rule { height: 3px; background: linear-gradient(90deg,#00AEEF,#EC008C,#FFD200); margin: 0 0 20px; border-radius: 2px; }
-h1 { font-size: 17pt; margin: 22px 0 3px; }
+/* Plain white letterhead: the mark centred, nothing behind it. The artwork
+   used here is the light-background variant (black splat, black tagline), so
+   any panel behind it would hide half the logo. */
+.header { text-align: center; padding: 0 0 6px; }
+.header img { height: 62px; width: auto; }
+.brand { font-size: 26pt; font-weight: 900; color: #18181b; letter-spacing: -0.5pt; line-height: 1; }
+.tagline { font-size: 7pt; letter-spacing: 2.5pt; text-transform: uppercase; color: #a1a1aa; margin-top: 4px; }
+.doc-title { text-align: center; margin: 4px 0 26px; }
+h1 { font-size: 17pt; margin: 0 0 3px; }
 .muted { color: #71717a; }
 .meta { width: 100%; margin: 14px 0 22px; border-collapse: collapse; }
 .meta td { vertical-align: top; padding: 0; width: 50%; font-size: 9pt; }
@@ -31,19 +35,22 @@ table.totals tr.grand td { border-top: 2px solid #18181b; font-size: 13pt; font-
 
 <div class="header">
   {% if LOGO_URL %}
-  <img src="{{ LOGO_URL }}" alt="InkPro — Think Ink, Think Pro" style="height:52px;width:auto;display:block;">
+  <img src="{{ LOGO_URL }}" alt="InkPro — Think Ink, Think Pro">
   {% else %}
   <div class="brand">InkPro</div>
   <div class="tagline">Think Ink, Think Pro</div>
   {% endif %}
 </div>
-<div class="rule"></div>
 
-<h1>Quote {{ quote.quote_number }}</h1>
-<div class="muted" style="font-size:9pt;">
-  Issued {{ quote.sent_at|date:"j F Y"|default:quote.created_at|date:"j F Y" }}
-  {% if quote.valid_until %} · valid until {{ quote.valid_until|date:"j F Y" }}{% endif %}
-  {% if quote.is_urgent %} · <span class="badge">Rush job</span>{% endif %}
+{% comment %}Centred under the mark so the whole letterhead reads as one
+block, before the document body returns to the left margin.{% endcomment %}
+<div class="doc-title">
+  <h1>Quote {{ quote.quote_number }}</h1>
+  <div class="muted" style="font-size:9pt;">
+    Issued {{ quote.sent_at|date:"j F Y"|default:quote.created_at|date:"j F Y" }}
+    {% if quote.valid_until %} · valid until {{ quote.valid_until|date:"j F Y" }}{% endif %}
+    {% if quote.is_urgent %} · <span class="badge">Rush job</span>{% endif %}
+  </div>
 </div>
 
 <table class="meta">
@@ -58,7 +65,7 @@ table.totals tr.grand td { border-top: 2px solid #18181b; font-size: 13pt; font-
     <td>
       <div class="label">From</div>
       <strong>InkPro</strong><br>
-      hello@inkpro.example<br>
+      inkpro@inkpro.com<br>
       {{ SITE_URL|default:"inkpro.example" }}
     </td>
   </tr>

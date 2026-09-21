@@ -363,7 +363,10 @@ def signup(request):
 
         group, _ = Group.objects.get_or_create(name=CUSTOMER_GROUP)
         user.groups.add(group)
-        login(request, user)
+        # The user was just created rather than authenticated, so it carries no
+        # `backend` attribute. With more than one backend configured Django
+        # cannot guess which to record on the session, so name it explicitly.
+        login(request, user, backend=settings.AUTHENTICATION_BACKENDS[0])
         # Carry any in-progress draft over to the new account.
         draft = get_draft_quote(request, create=False)
         if draft and not draft.customer:
