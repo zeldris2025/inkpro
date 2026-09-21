@@ -8,12 +8,13 @@ Images are matched by **content hash**, not by page position, so the mapping
 below survives the PDF being re-exported or re-ordered. Re-running the command
 updates the existing rows rather than duplicating them.
 
-    python manage.py import_ratecard_images "INKPRO Material Rates.pdf"
-    python manage.py import_ratecard_images rates.pdf --dry-run
+    python manage.py import_ratecard_images            # uses assets/rate-card.pdf
+    python manage.py import_ratecard_images other.pdf --dry-run
 """
 
 import hashlib
 import io
+from pathlib import Path
 
 from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand, CommandError
@@ -78,7 +79,12 @@ class Command(BaseCommand):
     help = "Extract the rate card PDF's product photos and attach them to service categories."
 
     def add_arguments(self, parser):
-        parser.add_argument('path', help='Path to the rate card PDF.')
+        parser.add_argument(
+            'path',
+            nargs='?',
+            default=None,
+            help='Path to the rate card PDF (default: assets/rate-card.pdf).',
+        )
         parser.add_argument('--dry-run', action='store_true', help='Report without writing.')
         parser.add_argument(
             '--replace',
@@ -96,10 +102,13 @@ class Command(BaseCommand):
         except ImportError as exc:  # pragma: no cover
             raise CommandError('Pillow is required: pip install Pillow') from exc
 
+        from django.conf import settings
+
+        path = options['path'] or (Path(settings.BASE_DIR) / 'assets' / 'rate-card.pdf')
         try:
-            reader = PdfReader(options['path'])
+            reader = PdfReader(path)
         except FileNotFoundError as exc:
-            raise CommandError(f'PDF not found: {options["path"]}') from exc
+            raise CommandError(f'Rate card PDF not found: {path}') from exc
 
         categories = {c.slug: c for c in ServiceCategory.objects.all()}
         if not categories:
