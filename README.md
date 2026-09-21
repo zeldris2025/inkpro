@@ -440,30 +440,125 @@ the seeded catalogue's fidelity to the printed rate card.
 
 ---
 
-## Deployment
+## Deploying to Azure App Service
+
+Target: **App Service (Linux, Python runtime)** + **Azure Database for
+PostgreSQL** + the domain **inkprosamoa.com**.
+
+### 1. Provision
+
+```bash
+# PostgreSQL flexible server
+az postgres flexible-server create \
+  --name inkpro-db --resource-group inkpro-rg \
+  --location australiaeast --tier Burstable --sku-name Standard_B1ms \
+  --database-name inkpro --public-access 0.0.0.0
+
+# App Service
+az webapp up --name inkpro --resource-group inkpro-rg \
+  --runtime "PYTHON:3.12" --sku B1
+```
+
+### 2. Configure
+
+Set everything from [`.env.production.example`](.env.production.example) as
+App Service **Application settings** (not a `.env` file — App Service injects
+them as environment variables). Generate the secret key first:
+
+```bash
+python manage.py generate_secret_key
+```
+
+Two platform settings are easy to miss and both cause data loss:
+
+| Setting | Why |
+| --- | --- |
+| `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` | Without it `/home` is not persistent and every uploaded file vanishes on restart |
+| `SCM_DO_BUILD_DURING_DEPLOYMENT=true` | Without it Oryx never installs `requirements.txt` |
+
+### 3. Startup command
+
+Set the App Service startup command to:
+
+```
+bash /home/site/wwwroot/startup.sh
+```
+
+[`startup.sh`](startup.sh) installs WeasyPrint's native libraries, creates the
+persistent media directory, migrates, seeds the catalogue, runs
+`collectstatic`, then execs gunicorn.
+
+### 4. Verify
+
+```bash
+python manage.py deploycheck
+```
+
+Run it against the production environment. It checks the things Django's own
+`check --deploy` does not — each of which fails *silently* rather than loudly:
+
+| Check | Silent failure it prevents |
+| --- | --- |
+| Database engine | SQLite on an ephemeral disk loses every quote and invoice on restart |
+| Media middleware + writability | Product photos and customer artwork 404 |
+| `collectstatic` has run | Manifest storage 500s on every stylesheet |
+| Email backend | Quotes printed to the log instead of sent |
+| `SITE_URL` | Dead accept/decline links in customers' emails |
+| WeasyPrint | Quotes silently downgrade from PDF to HTML |
+
+It exits non-zero on any blocking issue, so it can gate a release.
+
+### Two things specific to this stack
+
+**Media does not come from the repo.** `media/` is gitignored, and on App
+Service only `/home` survives a restart — while a deploy *replaces*
+`/home/site/wwwroot`. So `MEDIA_ROOT` is set to `/home/site/media`, outside the
+deployed tree. `startup.sh` re-imports the product photography from the
+committed rate card PDF on every boot, so the gallery is self-healing; customer
+artwork uploads persist because they live outside wwwroot.
+
+Django only routes `MEDIA_URL` when `DEBUG` is on, and WhiteNoise handles
+static files only — so [`main/middleware.py`](main/middleware.py) serves
+`MEDIA_ROOT` through WhiteNoise in production, with `autorefresh` on so a
+customer's upload is visible without a restart.
+
+**WeasyPrint needs native libraries the Python runtime image lacks.**
+`startup.sh` attempts to `apt-get install` cairo and pango. Where the container
+does not permit it, the app still starts and quotes are emailed as HTML
+attachments instead of PDFs — `deploycheck` reports this as a warning, not a
+failure. If PDFs are essential, deploy the [`Dockerfile`](Dockerfile) to App
+Service for Containers instead; it installs the stack at build time.
+
+---
+
+## Deploying with Docker
 
 ```bash
 docker compose up --build
 ```
 
 Brings up Postgres, Redis, Gunicorn, a Celery worker and Beat, running
-migrations and the rate card seed on boot. Set `SECRET_KEY`, `ALLOWED_HOSTS` and
-`SITE_URL` in the environment first. Put Nginx or your platform's load balancer
-in front for TLS; WhiteNoise serves static files, so no separate static host is
-required.
+migrations and the seed on boot. Put a load balancer in front for TLS;
+WhiteNoise serves static files, so no separate static host is required.
 
 ---
 
 ## Before going live
 
-- Run `build_logo_assets` to regenerate the logo assets from `assets/`.
-- Run `import_ratecard_images` against the rate card PDF.
-- Import the real register: `import_register "INKPRO Recharge Register 2026.xlsx"`.
-- Replace the placeholder contact details (`hello@inkpro.example`) in
-  `templates/main/contact.html`, the email footer and the quote PDF.
-- Add your NZBN and physical address to the quote PDF terms block.
-- Set a real `SECRET_KEY`, `DEBUG=False`, and a real `ALLOWED_HOSTS`.
-- Confirm the GST rate and the quote validity period.
-- Confirm the small-format sticker range (see "Product photography" note).
-- Swap the marketing-stat floors in `main/views.py:home` for real figures.
-- Replace the placeholder testimonials in `templates/main/home.html`.
+- [ ] `python manage.py deploycheck` passes against the production environment.
+- [ ] `SECRET_KEY` generated (`manage.py generate_secret_key`), `DEBUG=False`.
+- [ ] `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` name inkprosamoa.com, not `*`.
+- [ ] `DATABASE_URL` points at Postgres — **not** SQLite.
+- [ ] `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` and `MEDIA_ROOT=/home/site/media`.
+- [ ] SMTP configured and a test quote actually arrives in an inbox.
+- [ ] `SITE_URL=https://inkprosamoa.com`, and an emailed accept link opens.
+- [ ] Custom domain bound with a TLS certificate.
+- [ ] Import the real register: `manage.py import_register "INKPRO Recharge Register 2026.xlsx"`.
+- [ ] Re-upload the hand-added Vehicle Decals photo (it is not in the repo).
+- [ ] Replace the placeholder contact details (`hello@inkpro.example`) in
+      `templates/main/contact.html`, the email footer and the quote PDF.
+- [ ] Add the business number and physical address to the quote PDF terms.
+- [ ] Confirm the GST rate, the quote validity period and the launch promo copy.
+- [ ] Swap the marketing-stat floors in `main/views.py:home` for real figures.
+- [ ] Replace the placeholder testimonials in `templates/main/home.html`.
+- [ ] Take a database backup schedule on the Postgres server.

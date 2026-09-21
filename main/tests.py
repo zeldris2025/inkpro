@@ -1470,14 +1470,16 @@ class DependencyDeclarationTests(TestCase):
         'environ': 'django-environ',
     }
 
-    #: Provided by Django itself or the standard library.
-    NOT_DEPENDENCIES = {
-        'django', 'main', 'inkpro', 'os', 'sys', 'io', 're', 'csv', 'json',
-        'random', 'hashlib', 'logging', 'secrets', 'decimal', 'datetime',
-        'pathlib', 'functools', 'collections', 'urllib', 'unittest', 'typing',
-        'subprocess', 'shutil', 'tempfile', 'itertools', 'math', 'time',
-        'string', 'textwrap', 'uuid', 'base64', 'copy', 'warnings',
-    }
+    #: This project's own packages. Everything in the standard library is
+    #: excluded via sys.stdlib_module_names rather than a hand-kept list, which
+    #: would quietly rot as the code grows.
+    FIRST_PARTY = {'django', 'main', 'inkpro'}
+
+    @property
+    def not_dependencies(self):
+        import sys
+
+        return self.FIRST_PARTY | set(sys.stdlib_module_names)
 
     def declared_packages(self):
         from django.conf import settings
@@ -1505,7 +1507,8 @@ class DependencyDeclarationTests(TestCase):
                     match = pattern.match(line)
                     if match:
                         found.add(match.group(1))
-        return {name for name in found if name.lower() not in self.NOT_DEPENDENCIES}
+        excluded = self.not_dependencies
+        return {name for name in found if name not in excluded and name.lower() not in excluded}
 
     def test_no_third_party_import_is_undeclared(self):
         declared = self.declared_packages()
@@ -1523,3 +1526,89 @@ class DependencyDeclarationTests(TestCase):
     def test_pypdf_specifically_is_declared(self):
         # The photo import silently produced an empty gallery without it.
         self.assertIn('pypdf', self.declared_packages())
+
+
+class ProductionReadinessTests(TestCase):
+    """Guards for the things that only break once the site is deployed."""
+
+    def test_media_is_served_when_debug_is_off(self):
+        """Django only routes MEDIA_URL when DEBUG is on. Without the media
+        middleware every product photo and artwork upload 404s in production —
+        which is invisible in development."""
+        from django.conf import settings
+
+        self.assertTrue(
+            any('MediaFilesMiddleware' in m for m in settings.MIDDLEWARE),
+            'Media middleware missing — uploads would 404 in production.',
+        )
+
+    def test_the_media_middleware_serves_a_real_file(self):
+        import tempfile
+
+        from django.test import override_settings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = pathlib.Path(tmp) / 'probe.txt'
+            target.write_text('hello')
+            with override_settings(MEDIA_ROOT=tmp, MEDIA_URL='/media/'):
+                from main.middleware import MediaFilesMiddleware
+
+                middleware = MediaFilesMiddleware(lambda request: 'fell-through')
+                request = RequestFactory().get('/media/probe.txt')
+                response = middleware(request)
+                self.assertNotEqual(response, 'fell-through')
+                self.assertEqual(response.status_code, 200)
+
+    def test_the_media_middleware_passes_unknown_paths_through(self):
+        from main.middleware import MediaFilesMiddleware
+
+        middleware = MediaFilesMiddleware(lambda request: 'fell-through')
+        self.assertEqual(middleware(RequestFactory().get('/services/')), 'fell-through')
+
+    @override_settings(DEBUG=True, SECRET_KEY='django-insecure-short')
+    def test_deploycheck_blocks_an_unsafe_configuration(self):
+        from django.core.management import call_command
+
+        with self.assertRaises(SystemExit) as raised:
+            call_command('deploycheck', verbosity=0)
+        self.assertEqual(raised.exception.code, 1)
+
+    def test_generate_secret_key_produces_a_usable_key(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command('generate_secret_key', stdout=out)
+        key = out.getvalue().strip()
+        self.assertGreaterEqual(len(key), 50)
+        self.assertNotIn('insecure', key)
+
+    def test_postgres_settings_require_tls_and_reuse_connections(self):
+        """Azure Database for PostgreSQL refuses plaintext connections, and a
+        new connection per request burns the instance's connection allowance."""
+        import environ
+
+        env = environ.Env()
+        config = env.db_url_config(
+            'postgres://u:p@srv.postgres.database.azure.com:5432/inkpro?sslmode=require'
+        )
+        self.assertEqual(config['ENGINE'], 'django.db.backends.postgresql')
+        self.assertEqual(config['OPTIONS']['sslmode'], 'require')
+
+    def test_deployment_files_exist(self):
+        from django.conf import settings
+
+        base = pathlib.Path(settings.BASE_DIR)
+        for name in ('startup.sh', '.env.production.example', 'requirements.txt'):
+            with self.subTest(file=name):
+                self.assertTrue((base / name).exists())
+
+    def test_media_root_is_overridable_for_persistent_storage(self):
+        """On App Service only /home survives a restart, and a deploy replaces
+        /home/site/wwwroot — so MEDIA_ROOT has to be movable outside the tree."""
+        import environ
+
+        env = environ.Env(MEDIA_ROOT=(str, ''))
+        self.assertEqual(env('MEDIA_ROOT'), '')  # default falls back to BASE_DIR/media
+        self.assertIn('MEDIA_ROOT', pathlib.Path('inkpro/settings.py').read_text())

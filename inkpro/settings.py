@@ -32,6 +32,8 @@ env = environ.Env(
     GST_RATE=(str, '0.15'),
     QUOTE_VALID_DAYS=(int, 30),
     ENABLE_3D_HERO=(bool, False),
+    MEDIA_ROOT=(str, ''),
+    CONN_MAX_AGE=(int, 0),
     LAUNCH_PROMO_ENABLED=(bool, True),
     LAUNCH_PROMO_TEXT=(str, 'We just launched — our first 20 sales will receive a massive 50% discount'),
     CURRENCY_CODE=(str, 'WST'),
@@ -60,6 +62,9 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    # Uploaded media. Django only routes MEDIA_URL when DEBUG is on, so without
+    # this every photo and artwork file 404s in production.
+    'main.middleware.MediaFilesMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -74,6 +79,7 @@ try:  # pragma: no cover - import guard
     import whitenoise  # noqa: F401
 except ImportError:  # pragma: no cover
     MIDDLEWARE.remove('whitenoise.middleware.WhiteNoiseMiddleware')
+    MIDDLEWARE.remove('main.middleware.MediaFilesMiddleware')
 
 ROOT_URLCONF = 'inkpro.urls'
 
@@ -98,6 +104,15 @@ WSGI_APPLICATION = 'inkpro.wsgi.application'
 
 DATABASES = {'default': env.db('DATABASE_URL')}
 DATABASES['default'].setdefault('ATOMIC_REQUESTS', False)
+
+# Reusing connections matters on a managed Postgres: opening one per request
+# adds latency and burns the instance's connection allowance. Health checks
+# stop a reused-but-dead connection from failing the request after a failover.
+if DATABASES['default']['ENGINE'].endswith('postgresql'):
+    DATABASES['default']['CONN_MAX_AGE'] = env('CONN_MAX_AGE') or 60
+    DATABASES['default']['CONN_HEALTH_CHECKS'] = True
+    # Azure Database for PostgreSQL refuses connections without TLS.
+    DATABASES['default'].setdefault('OPTIONS', {}).setdefault('sslmode', 'require')
 
 # Sign-in accepts the username or the email address, in any case. See
 # main/auth_backends.py for why.
@@ -138,7 +153,11 @@ STORAGES = {
 }
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# Overridable because a deploy target's persistent disk is rarely inside the
+# app directory. On Azure App Service only /home survives a restart, and a
+# deployment replaces /home/site/wwwroot — so uploads belong somewhere like
+# /home/site/media, outside the deployed tree.
+MEDIA_ROOT = Path(env('MEDIA_ROOT')) if env('MEDIA_ROOT') else BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -210,4 +229,5 @@ if not DEBUG:  # pragma: no cover - production hardening
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
