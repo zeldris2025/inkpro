@@ -3,6 +3,7 @@ pricing arithmetic, quote status transitions and invoice balance derivation.
 """
 
 import pathlib
+import re
 from decimal import Decimal
 from unittest import mock
 
@@ -1396,3 +1397,129 @@ class QuoteDocumentTests(TestCase):
         self.assertGreater(len(content), 1000)
         if mimetype == 'application/pdf':
             self.assertTrue(content.startswith(b'%PDF'))
+
+
+class FreshCheckoutTests(TestCase):
+    """A clone carries no database or media, so the build inputs must be committed.
+
+    These guard the failure mode where someone clones the repo and finds an
+    empty site: the catalogue and photography have to be rebuildable from
+    files that are actually in version control.
+    """
+
+    def assets_dir(self):
+        from django.conf import settings
+
+        return pathlib.Path(settings.BASE_DIR) / 'assets'
+
+    def test_every_build_input_is_committed(self):
+        for name in ('rate-card.pdf', 'logo-master-on-light.png', 'logo-master-on-dark.png'):
+            with self.subTest(asset=name):
+                self.assertTrue(
+                    (self.assets_dir() / name).exists(),
+                    f'{name} must be committed — bootstrap rebuilds the site from it.',
+                )
+
+    def test_the_image_importer_defaults_to_the_committed_pdf(self):
+        # Otherwise it only works on the machine that has the original download.
+        from main.management.commands import import_ratecard_images
+
+        command = import_ratecard_images.Command()
+        parser = command.create_parser('manage.py', 'import_ratecard_images')
+        self.assertIsNone(parser.parse_args([]).path)
+
+    def test_bootstrap_builds_a_usable_catalogue(self):
+        from django.core.management import call_command
+
+        self.assertEqual(ServiceCategory.objects.count(), 0)
+        call_command('bootstrap', '--skip-images', verbosity=0)
+
+        self.assertGreaterEqual(ServiceCategory.objects.count(), 10)
+        self.assertGreaterEqual(PricingRule.objects.count(), 28)
+        self.assertTrue(UrgentFee.current())
+
+    def test_bootstrap_is_safe_to_run_twice(self):
+        from django.core.management import call_command
+
+        call_command('bootstrap', '--skip-images', verbosity=0)
+        first = ServiceCategory.objects.count()
+        call_command('bootstrap', '--skip-images', verbosity=0)
+        self.assertEqual(ServiceCategory.objects.count(), first)
+
+    def test_generated_artefacts_stay_out_of_version_control(self):
+        from django.conf import settings
+
+        ignored = (pathlib.Path(settings.BASE_DIR) / '.gitignore').read_text()
+        for pattern in ('*.sqlite3', 'media/', '.env'):
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, ignored)
+
+
+class DependencyDeclarationTests(TestCase):
+    """Every third-party import must be declared in requirements.txt.
+
+    An undeclared dependency works forever on the machine that happened to
+    `pip install` it and fails only on a fresh checkout — which is exactly how
+    `pypdf` went missing and left a cloned site with no product photography.
+    """
+
+    #: import name -> distribution name, where they differ.
+    DISTRIBUTION_NAMES = {
+        'PIL': 'pillow',
+        'rest_framework': 'djangorestframework',
+        'environ': 'django-environ',
+    }
+
+    #: Provided by Django itself or the standard library.
+    NOT_DEPENDENCIES = {
+        'django', 'main', 'inkpro', 'os', 'sys', 'io', 're', 'csv', 'json',
+        'random', 'hashlib', 'logging', 'secrets', 'decimal', 'datetime',
+        'pathlib', 'functools', 'collections', 'urllib', 'unittest', 'typing',
+        'subprocess', 'shutil', 'tempfile', 'itertools', 'math', 'time',
+        'string', 'textwrap', 'uuid', 'base64', 'copy', 'warnings',
+    }
+
+    def declared_packages(self):
+        from django.conf import settings
+
+        text = (pathlib.Path(settings.BASE_DIR) / 'requirements.txt').read_text()
+        names = set()
+        for line in text.splitlines():
+            line = line.split('#')[0].strip()
+            if not line:
+                continue
+            name = re.split(r'[=<>!\[]', line)[0].strip().lower()
+            if name:
+                names.add(name)
+        return names
+
+    def imported_packages(self):
+        from django.conf import settings
+
+        base = pathlib.Path(settings.BASE_DIR)
+        pattern = re.compile(r'^\s*(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)')
+        found = set()
+        for directory in ('main', 'inkpro'):
+            for path in (base / directory).rglob('*.py'):
+                for line in path.read_text().splitlines():
+                    match = pattern.match(line)
+                    if match:
+                        found.add(match.group(1))
+        return {name for name in found if name.lower() not in self.NOT_DEPENDENCIES}
+
+    def test_no_third_party_import_is_undeclared(self):
+        declared = self.declared_packages()
+        missing = []
+        for name in sorted(self.imported_packages()):
+            distribution = self.DISTRIBUTION_NAMES.get(name, name).lower()
+            if distribution not in declared:
+                missing.append(f'{name} (expected "{distribution}" in requirements.txt)')
+        self.assertEqual(
+            missing, [],
+            'Undeclared dependencies — a fresh clone will fail on these:\n  '
+            + '\n  '.join(missing),
+        )
+
+    def test_pypdf_specifically_is_declared(self):
+        # The photo import silently produced an empty gallery without it.
+        self.assertIn('pypdf', self.declared_packages())

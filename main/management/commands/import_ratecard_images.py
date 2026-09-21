@@ -91,6 +91,11 @@ class Command(BaseCommand):
             action='store_true',
             help='Delete existing imported images for the matched categories first.',
         )
+        parser.add_argument(
+            '--prune',
+            action='store_true',
+            help='Afterwards, delete files in media/services that no record points at.',
+        )
 
     def handle(self, *args, **options):
         try:
@@ -162,6 +167,12 @@ class Command(BaseCommand):
                             'display_order': order,
                         },
                     )
+                    # Django's storage appends a suffix rather than overwriting,
+                    # so without clearing the old file first every re-run leaves
+                    # another orphaned copy behind in media/.
+                    if record.image:
+                        record.image.delete(save=False)
+                    self._remove_stale_file(record, filename)
                     record.image.save(filename, ContentFile(payload), save=True)
                     created += was_created
                     updated += not was_created
@@ -176,10 +187,21 @@ class Command(BaseCommand):
                 f'{len({v[0] for v in IMAGE_MAP.values()})} categories ({skipped} unmapped).'
             )
         )
+        if options['prune'] and not options['dry_run']:
+            self._prune_orphans()
+
         if not options['dry_run']:
             for slug in sorted({v[0] for v in IMAGE_MAP.values()}):
                 count = CategoryImage.objects.filter(category__slug=slug).count()
                 self.stdout.write(f'  {slug:24} {count} photo{"s" if count != 1 else ""}')
+
+    @staticmethod
+    def _remove_stale_file(record, filename):
+        """Clear an unreferenced file already sitting at the target path."""
+        target = record.image.field.upload_to + filename
+        storage = record.image.storage
+        if storage.exists(target):
+            storage.delete(target)
 
     def _optimise(self, Image, data, digest, slug):
         """Downscale and re-encode so the site is not serving print-weight art."""
@@ -200,3 +222,25 @@ class Command(BaseCommand):
         buffer = io.BytesIO()
         image.save(buffer, format='JPEG', quality=JPEG_QUALITY, optimize=True, progressive=True)
         return buffer.getvalue(), f'{slug}-{digest}.jpg'
+
+    def _prune_orphans(self):
+        """Remove files under media/services that no CategoryImage references."""
+        from pathlib import Path as _Path
+
+        from django.conf import settings
+
+        directory = _Path(settings.MEDIA_ROOT) / 'services'
+        if not directory.exists():
+            return
+        referenced = {
+            _Path(image.name).name
+            for image in (record.image for record in CategoryImage.objects.all())
+            if image
+        }
+        removed = 0
+        for path in directory.iterdir():
+            if path.is_file() and path.name not in referenced:
+                path.unlink()
+                removed += 1
+        if removed:
+            self.stdout.write(self.style.WARNING(f'  Pruned {removed} orphaned file(s).'))

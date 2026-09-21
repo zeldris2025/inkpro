@@ -43,28 +43,52 @@ class Command(BaseCommand):
         if options['demo']:
             steps.append(('Loading demo data', 'seed_demo', {}))
 
+        failures = []
         for index, (label, command, kwargs) in enumerate(steps, start=1):
             self.stdout.write(self.style.MIGRATE_HEADING(f'\n[{index}/{len(steps)}] {label}'))
             try:
                 call_command(command, **kwargs)
-            except CommandError as exc:
-                # A missing optional input should not abort the whole build —
-                # report it and carry on so the rest still comes up.
-                self.stdout.write(self.style.WARNING(f'  skipped: {exc}'))
+            except Exception as exc:
+                # One broken step should not abort the rest of the build, but it
+                # must not be whispered either: a skipped photo import used to
+                # print a warning and still report "Ready", which read as
+                # success on a site that had no photography.
+                self.stdout.write(self.style.ERROR(f'  FAILED: {exc}'))
+                failures.append((label, exc))
 
-        self.stdout.write(self.style.SUCCESS('\n' + self.summary()))
+        self.stdout.write('\n' + self.summary(failures))
+        if failures:
+            raise CommandError(
+                f'{len(failures)} step(s) failed — the site is not fully built. '
+                'Fix the errors above and re-run; bootstrap is safe to repeat.'
+            )
 
-    def summary(self):
+    def summary(self, failures=()):
         from main.models import CategoryImage, PricingRule, ServiceCategory
 
         if not connection.introspection.table_names():
-            return 'Nothing was created — check the errors above.'
+            return self.style.ERROR('Nothing was created — check the errors above.')
+
+        categories = ServiceCategory.objects.count()
+        rules = PricingRule.objects.count()
+        photos = CategoryImage.objects.count()
 
         lines = [
-            'Ready.',
-            f'  {ServiceCategory.objects.count()} service categories',
-            f'  {PricingRule.objects.count()} pricing rules',
-            f'  {CategoryImage.objects.count()} product photos',
+            self.style.ERROR('Built with errors.') if failures else self.style.SUCCESS('Ready.'),
+            f'  {categories} service categories',
+            f'  {rules} pricing rules',
+            self.style.ERROR(f'  {photos} product photos  <- expected 32')
+            if photos == 0
+            else f'  {photos} product photos',
+        ]
+        if photos == 0 and not failures:
+            lines.append(
+                self.style.WARNING(
+                    '\n  No photography imported. Check that pypdf is installed\n'
+                    '  (pip install -r requirements.txt) and that assets/rate-card.pdf exists.'
+                )
+            )
+        lines += [
             '',
             'Create a login with:  python manage.py createsuperuser',
             'Then:                 python manage.py runserver',

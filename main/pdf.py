@@ -68,9 +68,20 @@ def _base_url(request):
 
 
 def attach_pdf_to_quote(quote, request=None):
-    """Render and store the quote document on ``quote.pdf_file``."""
+    """Render and store the quote document on ``quote.pdf_file``.
+
+    Re-sending a quote replaces its document rather than adding another. Django
+    storage appends a suffix instead of overwriting, so without clearing the
+    old file first every send leaves an orphaned PDF behind in media/quotes.
+    """
     from django.core.files.base import ContentFile
 
     filename, content, _ = render_quote_pdf(quote, request=request)
+    if quote.pdf_file:
+        quote.pdf_file.delete(save=False)
+    storage = quote.pdf_file.storage
+    target = quote.pdf_file.field.upload_to + filename
+    if storage.exists(target):
+        storage.delete(target)
     quote.pdf_file.save(filename, ContentFile(content), save=True)
     return quote.pdf_file

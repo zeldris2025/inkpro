@@ -8,6 +8,7 @@ whitenoise==6.8.2             # static file serving behind Gunicorn
 # Documents & data
 weasyprint==70.0              # branded quote PDFs (needs cairo/pango on the host)
 openpyxl==3.1.5               # Recharge Register import
+pypdf==6.19.0                  # extracts the rate card's product photography
 Pillow==12.3.0                # artwork uploads and thumbnails
 
 # Async

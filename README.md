@@ -21,15 +21,38 @@ pip install -r requirements.txt
 
 cp .env.example .env            # optional; sensible defaults apply without it
 
-python manage.py migrate
-python manage.py seed_ratecard  # loads the published rate card
-python manage.py bootstrap_groups
-python manage.py seed_demo      # optional demo data for the dashboard
+python manage.py bootstrap      # migrate, seed, build assets, import photos
+python manage.py createsuperuser
 python manage.py runserver
 ```
 
-`seed_demo` creates a staff login — username `staff`, password `inkpro123`.
-Create a real superuser with `python manage.py createsuperuser`.
+`bootstrap` is the whole build in one step, and every part of it is idempotent,
+so re-run it any time — especially after a `git pull`. Add `--demo` to also
+load sample quotes and register entries so the staff dashboard has something to
+show.
+
+### Why a fresh clone starts empty
+
+The database (`db.sqlite3`), the uploaded media directory and the compiled
+static files are **build products, not source**, so they are deliberately not
+in version control — a shared SQLite file would collide on every pull, and
+`media/` holds customer artwork.
+
+What *is* committed is everything needed to rebuild them: the rate card PDF and
+the logo masters in [`assets/`](assets/). That is what `bootstrap` reads. So a
+clone that has not been bootstrapped has no services, no pricing and no
+photography — it is not broken, it just has not been built yet.
+
+| Step | Rebuilds |
+| --- | --- |
+| `migrate` | The database schema |
+| `seed_ratecard` | 10 service categories, 28 pricing rules, the urgent fee band, email templates |
+| `bootstrap_groups` | The Customer / Staff / Owner role groups |
+| `build_logo_assets` | `static/img/` logo variants and favicon, from `assets/` |
+| `import_ratecard_images` | The 32 product photos into `media/`, from `assets/rate-card.pdf` |
+
+Real business data is **not** committed and has to be imported separately on
+each machine — see [Importing the existing register](#importing-the-existing-register).
 
 | Area | URL |
 | --- | --- |
