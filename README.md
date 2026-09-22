@@ -255,6 +255,7 @@ so a double-click cannot create two invoices.
 
 ```
 inkpro/            project settings, URLs, Celery app
+  media.py         where uploads live, so a deploy cannot erase them
 main/
   models.py        catalogue, quotes, invoices, email templates
   pricing.py       pure pricing arithmetic (unit tested)
@@ -272,6 +273,7 @@ main/
     bootstrap_groups.py create the role groups
     seed_demo.py        demo data for development
     graphcheck.py       verify the Microsoft Graph email credentials
+    mediacheck.py       find uploads whose file is missing from disk
 templates/         base, marketing, wizard, account, staff, email, pdf
 static/            brand CSS, animation JS, logo assets
 ```
@@ -624,10 +626,33 @@ It exits non-zero on any blocking issue, so it can gate a release.
 
 **Media does not come from the repo.** `media/` is gitignored, and on App
 Service only `/home` survives a restart — while a deploy *replaces*
-`/home/site/wwwroot`. So `MEDIA_ROOT` is set to `/home/site/media`, outside the
-deployed tree. `startup.sh` re-imports the product photography from the
-committed rate card PDF on every boot, so the gallery is self-healing; customer
-artwork uploads persist because they live outside wwwroot.
+`/home/site/wwwroot`. Uploads must therefore live at `/home/site/media`,
+outside the deployed tree; anything inside it is deleted by the next push while
+its database row survives, leaving broken images and no record of what was
+lost.
+
+Because that loss is silent and permanent, the safe path is not left to an
+application setting somebody has to remember: [`inkpro/media.py`](inkpro/media.py)
+defaults `MEDIA_ROOT` to `/home/site/media` whenever the app is running on App
+Service from inside `wwwroot`. An explicit `MEDIA_ROOT` still wins, `deploycheck`
+*fails* if it points into the deployed tree, and `startup.sh` exports it too —
+three layers, because one forgotten setting used to be enough to lose every
+image.
+
+`startup.sh` also re-imports the product photography from the committed rate
+card PDF on every boot, so the gallery is self-healing. To see what else is
+missing:
+
+```bash
+python manage.py mediacheck            # rows whose file is gone
+python manage.py mediacheck --verbose  # name each one
+python manage.py mediacheck --clear-missing   # blank the dead references
+```
+
+It runs on every boot as well, so a wiped media directory shows up in the log
+stream rather than as a broken image on the site. Hero images and customer
+artwork are the only uploads that cannot be regenerated — they need re-uploading
+from the originals.
 
 Django only routes `MEDIA_URL` when `DEBUG` is on, and WhiteNoise handles
 static files only — so [`main/middleware.py`](main/middleware.py) serves
@@ -650,6 +675,7 @@ Service for Containers instead; it installs the stack at build time.
 | `no such table: main_invoice` | Running on SQLite — the database was never found, or migrations never ran | Check `deploycheck`; make sure the startup command is set so `migrate` runs |
 | `No matching distribution found for psycopg-binary` | Pin predates cp314 wheels | Requires `psycopg[binary]>=3.2.10` |
 | Site loads but every image is broken | Media not served, or never imported | `deploycheck` reports both; `startup.sh` re-imports photos each boot |
+| Images vanished after a deploy | `MEDIA_ROOT` was inside `/home/site/wwwroot`, which the deploy replaced | `manage.py mediacheck` lists what went; set `MEDIA_ROOT=/home/site/media` (now the default on App Service) and re-upload hero images |
 | Stylesheets 500 | `collectstatic` has not run under manifest storage | `startup.sh` runs it; check the build log |
 | Quotes arrive as `.html` not `.pdf` | WeasyPrint's native libraries are missing | Expected on the Python runtime; deploy the container image for real PDFs |
 | Quote accept links point at localhost | `SITE_URL` not set | Set `SITE_URL=https://inkprosamoa.com` |

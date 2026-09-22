@@ -11,6 +11,7 @@ from pathlib import Path
 import environ
 
 from .database import resolve_database_url
+from .media import resolve_media_root
 from .origins import trusted_origins
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -172,11 +173,11 @@ STORAGES = {
 }
 
 MEDIA_URL = '/media/'
-# Overridable because a deploy target's persistent disk is rarely inside the
-# app directory. On Azure App Service only /home survives a restart, and a
-# deployment replaces /home/site/wwwroot — so uploads belong somewhere like
-# /home/site/media, outside the deployed tree.
-MEDIA_ROOT = Path(env('MEDIA_ROOT')) if env('MEDIA_ROOT') else BASE_DIR / 'media'
+# Not simply BASE_DIR/media: on Azure App Service that path is inside the tree
+# a deployment replaces, so every uploaded image would be lost on the next
+# push while its database row survived. See media.py — an explicit MEDIA_ROOT
+# still wins.
+MEDIA_ROOT = resolve_media_root(BASE_DIR, env('MEDIA_ROOT'))
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

@@ -28,7 +28,9 @@ fi
 
 # --- Persistent media --------------------------------------------------------
 # /home survives restarts; /home/site/wwwroot is replaced on every deploy, so
-# uploads live alongside it rather than inside it.
+# uploads live alongside it rather than inside it. settings.py defaults to the
+# same path when running on App Service, so this holds even if the startup
+# command is bypassed — belt and braces, because losing uploads is permanent.
 export MEDIA_ROOT="${MEDIA_ROOT:-/home/site/media}"
 mkdir -p "$MEDIA_ROOT"
 echo "==> Media root: $MEDIA_ROOT"
@@ -42,6 +44,10 @@ python manage.py migrate --noinput
 echo "==> Seeding catalogue"
 python manage.py bootstrap --skip-images || echo "!! Catalogue seed reported errors (see above)"
 python manage.py import_ratecard_images || echo "!! Photo import failed — gallery will be empty"
+
+# Names any upload whose database row outlived its file, so a wiped media
+# directory shows up in the boot log rather than as a broken image on the site.
+python manage.py mediacheck || true
 
 # --- Configuration -----------------------------------------------------------
 # App Service application settings reach the app as environment variables. When

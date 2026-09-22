@@ -9,6 +9,7 @@ failure mode that is silent rather than loud:
   * A SITE_URL left at localhost puts dead links in customers' emails.
   * WeasyPrint without its native libraries downgrades PDFs to HTML.
   * An un-run collectstatic leaves the site unstyled under a manifest storage.
+  * A MEDIA_ROOT inside the deployed tree loses every upload on the next push.
 
 Run it against the production environment:
 
@@ -120,7 +121,17 @@ class Command(BaseCommand):
             self.warnings.append('Database connection is not requiring TLS.')
 
     def check_media(self):
+        from inkpro.media import AZURE_MEDIA_ROOT, inside_deploy_tree
+
         root = Path(settings.MEDIA_ROOT)
+        if inside_deploy_tree(root):
+            # The deployed tree is replaced wholesale by the next push, which
+            # takes every uploaded image with it and leaves the rows behind.
+            self.failures.append(
+                f'MEDIA_ROOT is inside the deployed tree ({root}) — the next deployment '
+                f'will delete every uploaded image. Set MEDIA_ROOT={AZURE_MEDIA_ROOT}.'
+            )
+            return
         if not root.exists():
             self.warnings.append(f'MEDIA_ROOT does not exist yet: {root}')
             return

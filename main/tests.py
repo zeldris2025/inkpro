@@ -1968,3 +1968,91 @@ class GraphEmailBackendTests(TestCase):
             except SystemExit:
                 pass
         self.assertIn('MS_GRAPH_TENANT_ID', out.getvalue())
+
+
+class MediaRootResolutionTests(TestCase):
+    """Uploads must never default into the tree an Azure deploy replaces."""
+
+    def test_explicit_setting_always_wins(self):
+        from inkpro.media import resolve_media_root
+
+        self.assertEqual(
+            resolve_media_root('/app', '/mnt/share/media', environ={}),
+            pathlib.Path('/mnt/share/media'),
+        )
+
+    def test_local_default_is_beside_the_project(self):
+        from inkpro.media import resolve_media_root
+
+        self.assertEqual(
+            resolve_media_root('/home/dev/inkpro', '', environ={}),
+            pathlib.Path('/home/dev/inkpro/media'),
+        )
+
+    def test_azure_default_escapes_the_deployed_tree(self):
+        from inkpro.media import AZURE_MEDIA_ROOT, resolve_media_root
+
+        resolved = resolve_media_root(
+            '/home/site/wwwroot', '', environ={'WEBSITE_SITE_NAME': 'inkpro'}
+        )
+        self.assertEqual(resolved, AZURE_MEDIA_ROOT)
+        self.assertEqual(str(resolved), '/home/site/media')
+
+    def test_azure_container_outside_wwwroot_keeps_its_own_layout(self):
+        """The Docker image serves from /app, which no deployment replaces."""
+        from inkpro.media import resolve_media_root
+
+        self.assertEqual(
+            resolve_media_root('/app', '', environ={'WEBSITE_SITE_NAME': 'inkpro'}),
+            pathlib.Path('/app/media'),
+        )
+
+    def test_deploycheck_fails_on_a_media_root_inside_the_deployed_tree(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        with override_settings(MEDIA_ROOT='/home/site/wwwroot/media'):
+            try:
+                call_command('deploycheck', stdout=out)
+            except SystemExit:
+                pass
+        self.assertIn('inside the deployed tree', out.getvalue())
+
+
+class MediaCheckCommandTests(TestCase):
+    """mediacheck names the uploads a deployment took with it."""
+
+    def test_missing_file_is_reported_and_can_be_cleared(self):
+        import tempfile
+        from io import StringIO
+
+        from django.core.files.base import ContentFile
+        from django.core.management import call_command
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                category = ServiceCategory.objects.create(
+                    name='Banners', slug='banners-mediacheck'
+                )
+                category.hero_image.save('hero.png', ContentFile(b'not-really-a-png'))
+                path = pathlib.Path(category.hero_image.path)
+                self.assertTrue(path.exists())
+
+                out = StringIO()
+                call_command('mediacheck', stdout=out)
+                self.assertIn('ServiceCategory.hero_image: 1 file(s) present', out.getvalue())
+
+                path.unlink()  # what the deployment did
+
+                out = StringIO()
+                call_command('mediacheck', '--verbose', stdout=out)
+                report = out.getvalue()
+                self.assertIn('GONE  ServiceCategory.hero_image: 1 missing', report)
+                self.assertIn('hero', report)
+
+                out = StringIO()
+                call_command('mediacheck', '--clear-missing', stdout=out)
+                category.refresh_from_db()
+                self.assertFalse(category.hero_image)
