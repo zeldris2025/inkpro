@@ -2,6 +2,7 @@
 pricing arithmetic, quote status transitions and invoice balance derivation.
 """
 
+import base64
 import pathlib
 import re
 from decimal import Decimal
@@ -1837,3 +1838,133 @@ class HealthCheckTests(TestCase):
             value = settings.DATABASES['default'].get(key)
             if value and len(str(value)) > 6:
                 self.assertNotIn(str(value), body)
+
+
+class GraphEmailBackendTests(TestCase):
+    """The Microsoft 365 backend: payload shape, credentials, token reuse."""
+
+    graph_settings = {
+        'EMAIL_BACKEND': 'main.graph_mail.GraphEmailBackend',
+        'MS_GRAPH_TENANT_ID': 'tenant-1',
+        'MS_GRAPH_CLIENT_ID': 'client-1',
+        'MS_GRAPH_CLIENT_SECRET': 'secret-1',
+        'MS_GRAPH_SENDER': 'sales@inkprosamoa.com',
+    }
+
+    def setUp(self):
+        from main import graph_mail
+
+        graph_mail._token_cache.clear()
+        self.addCleanup(graph_mail._token_cache.clear)
+
+    def _message(self):
+        message = mail.EmailMultiAlternatives(
+            subject='Your quote',
+            body='Plain text body',
+            from_email='InkPro <quotes@inkprosamoa.com>',
+            to=['customer@example.com'],
+            cc=['manager@inkprosamoa.com'],
+            reply_to=['sales@inkprosamoa.com'],
+        )
+        message.attach_alternative('<p>HTML body</p>', 'text/html')
+        message.attach('quote.pdf', b'%PDF-1.4 fake', 'application/pdf')
+        return message
+
+    def test_payload_prefers_html_and_encodes_attachments(self):
+        from main.graph_mail import build_graph_message
+
+        payload = build_graph_message(self._message())
+        message = payload['message']
+        self.assertEqual(message['body']['contentType'], 'HTML')
+        self.assertEqual(message['body']['content'], '<p>HTML body</p>')
+        self.assertEqual(
+            message['toRecipients'], [{'emailAddress': {'address': 'customer@example.com'}}]
+        )
+        self.assertEqual(
+            message['ccRecipients'], [{'emailAddress': {'address': 'manager@inkprosamoa.com'}}]
+        )
+        self.assertEqual(
+            message['replyTo'], [{'emailAddress': {'address': 'sales@inkprosamoa.com'}}]
+        )
+        attachment = message['attachments'][0]
+        self.assertEqual(attachment['name'], 'quote.pdf')
+        self.assertEqual(base64.b64decode(attachment['contentBytes']), b'%PDF-1.4 fake')
+
+    def test_oversized_attachment_is_dropped_not_sent(self):
+        from main import graph_mail
+
+        message = mail.EmailMessage(subject='Big', body='x', to=['a@example.com'])
+        message.attach('huge.pdf', b'0' * (graph_mail.MAX_ATTACHMENT_BYTES + 1), 'application/pdf')
+        with self.assertLogs('main.graph_mail', level='ERROR'):
+            payload = graph_mail.build_graph_message(message)
+        self.assertNotIn('attachments', payload['message'])
+
+    def test_send_posts_to_the_configured_mailbox(self):
+        from main.graph_mail import GraphEmailBackend
+
+        with override_settings(**self.graph_settings):
+            backend = GraphEmailBackend()
+            with mock.patch('main.graph_mail._post_json', return_value=None) as posted, \
+                    mock.patch('main.graph_mail.TokenCache._fetch', return_value=('tok', 3600)):
+                self.assertEqual(backend.send_messages([self._message(), self._message()]), 2)
+
+        self.assertEqual(posted.call_count, 2)
+        url, payload, token, _timeout = posted.call_args[0]
+        self.assertEqual(
+            url, 'https://graph.microsoft.com/v1.0/users/sales%40inkprosamoa.com/sendMail'
+        )
+        self.assertEqual(token, 'tok')
+        self.assertTrue(payload['saveToSentItems'])
+
+    def test_send_falls_back_to_the_from_address_without_a_sender(self):
+        from main.graph_mail import GraphEmailBackend
+
+        with override_settings(**{**self.graph_settings, 'MS_GRAPH_SENDER': ''}):
+            backend = GraphEmailBackend()
+            with mock.patch('main.graph_mail._post_json', return_value=None) as posted, \
+                    mock.patch('main.graph_mail.TokenCache._fetch', return_value=('tok', 3600)):
+                backend.send_messages([self._message()])
+
+        self.assertIn('quotes%40inkprosamoa.com', posted.call_args[0][0])
+
+    def test_missing_credentials_raise_a_clear_error(self):
+        from main.graph_mail import GraphEmailBackend, GraphError
+
+        with override_settings(
+            **{**self.graph_settings, 'MS_GRAPH_CLIENT_SECRET': ''}
+        ):
+            backend = GraphEmailBackend()
+            self.assertEqual(backend.missing_settings(), ['MS_GRAPH_CLIENT_SECRET'])
+            with self.assertRaises(GraphError) as caught:
+                backend.get_token()
+        self.assertIn('MS_GRAPH_CLIENT_SECRET', str(caught.exception))
+
+    def test_token_is_cached_until_it_expires(self):
+        from main.graph_mail import GraphEmailBackend
+
+        with override_settings(**self.graph_settings):
+            backend = GraphEmailBackend()
+            with mock.patch(
+                'main.graph_mail.TokenCache._fetch', return_value=('tok', 3600)
+            ) as fetched:
+                self.assertEqual(backend.get_token(), 'tok')
+                self.assertEqual(backend.get_token(), 'tok')
+        self.assertEqual(fetched.call_count, 1)
+
+    def test_deploycheck_fails_when_graph_credentials_are_missing(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        with override_settings(
+            EMAIL_BACKEND='main.graph_mail.GraphEmailBackend',
+            MS_GRAPH_TENANT_ID='',
+            MS_GRAPH_CLIENT_ID='',
+            MS_GRAPH_CLIENT_SECRET='',
+        ):
+            try:
+                call_command('deploycheck', stdout=out)
+            except SystemExit:
+                pass
+        self.assertIn('MS_GRAPH_TENANT_ID', out.getvalue())

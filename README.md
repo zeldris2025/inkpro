@@ -262,6 +262,7 @@ main/
   views_staff.py   staff portal, approve-and-send, register
   api.py           DRF endpoints for the dashboard and live pricing
   emails.py        branded transactional email
+  graph_mail.py    Microsoft 365 email backend (Graph + OAuth)
   pdf.py           WeasyPrint quote documents
   tasks.py         Celery tasks with an inline fallback
   permissions.py   role groups and access helpers
@@ -270,6 +271,7 @@ main/
     import_register.py  import the historical spreadsheet
     bootstrap_groups.py create the role groups
     seed_demo.py        demo data for development
+    graphcheck.py       verify the Microsoft Graph email credentials
 templates/         base, marketing, wizard, account, staff, email, pdf
 static/            brand CSS, animation JS, logo assets
 ```
@@ -387,8 +389,55 @@ Sent on:
 - **Approve & send** — the quote PDF with one-click accept/decline links.
 - **Overdue invoices** — a weekday-morning Celery Beat reminder.
 
-The default `EMAIL_BACKEND` prints to the console. Switch to SMTP in `.env` to
-send for real.
+The default `EMAIL_BACKEND` prints to the console. Switch to SMTP — or, for the
+Microsoft 365 office mailbox, to Microsoft Graph — in `.env` to send for real.
+
+### Sending from the Microsoft 365 office mailbox
+
+Microsoft 365 has basic SMTP authentication switched off, so InkPro
+authenticates as a registered Azure AD application (OAuth 2.0 client
+credentials) and posts each message to Graph. The backend lives in
+`main/graph_mail.py` and needs no extra Python package.
+
+One-off set-up in the Azure portal, under **Entra ID > App registrations**:
+
+1. **New registration** — note the *Application (client) ID* and the
+   *Directory (tenant) ID*.
+2. **Certificates & secrets > New client secret** — copy the secret **value**
+   (the ID is not the secret, and the value is shown only once).
+3. **API permissions > Microsoft Graph > Application permissions >
+   `Mail.Send`**, then **Grant admin consent**. Delegated permission will not
+   work: nobody is signed in when a quote goes out.
+4. Optional but recommended — an Exchange `ApplicationAccessPolicy` scoping the
+   app to just the sending mailbox, so it cannot mail as anyone else.
+
+Then set, in `.env` or the App Service application settings:
+
+```
+EMAIL_BACKEND=main.graph_mail.GraphEmailBackend
+MS_GRAPH_TENANT_ID=...
+MS_GRAPH_CLIENT_ID=...
+MS_GRAPH_CLIENT_SECRET=...
+MS_GRAPH_SENDER=sales@inkprosamoa.com
+DEFAULT_FROM_EMAIL=InkPro <sales@inkprosamoa.com>
+```
+
+`MS_GRAPH_SENDER` is the mailbox messages are sent from, and should match the
+address in `DEFAULT_FROM_EMAIL` — recipients see the mailbox address either
+way. Copies land in that mailbox's Sent Items unless
+`MS_GRAPH_SAVE_TO_SENT_ITEMS=False`.
+
+Verify before a customer does:
+
+```bash
+python manage.py graphcheck                       # credentials and token only
+python manage.py graphcheck --to you@example.com  # also sends a test message
+```
+
+`deploycheck` also fails if the Graph backend is selected with any credential
+left blank. Attachments go inline, which Graph caps at roughly 3 MB — well
+above a quote PDF; anything larger is dropped with an error in the log rather
+than failing the send.
 
 ---
 
@@ -604,7 +653,9 @@ Service for Containers instead; it installs the stack at build time.
 | Stylesheets 500 | `collectstatic` has not run under manifest storage | `startup.sh` runs it; check the build log |
 | Quotes arrive as `.html` not `.pdf` | WeasyPrint's native libraries are missing | Expected on the Python runtime; deploy the container image for real PDFs |
 | Quote accept links point at localhost | `SITE_URL` not set | Set `SITE_URL=https://inkprosamoa.com` |
-| Emails never arrive | Console email backend still active | Set the SMTP variables |
+| Emails never arrive | Console email backend still active | Set the SMTP or `MS_GRAPH_*` variables |
+| Graph sends fail with 403 | `Mail.Send` consent missing, or an access policy excludes the mailbox | Re-check step 3 above, then `manage.py graphcheck` |
+| Graph sends fail with 401 | Client secret expired or mistyped (the *value*, not the ID) | Issue a new secret and update `MS_GRAPH_CLIENT_SECRET` |
 
 The most common cause of a half-working deploy is the **startup command not
 being set**: App Service then auto-detects Django and runs gunicorn directly,

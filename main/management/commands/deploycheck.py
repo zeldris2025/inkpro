@@ -162,8 +162,42 @@ class Command(BaseCommand):
             )
         elif 'smtp' in backend and not settings.EMAIL_HOST:
             self.failures.append('SMTP backend selected but EMAIL_HOST is empty.')
+        elif 'graph_mail' in backend:
+            self.check_graph_email()
         else:
             self.passes.append(f'Email backend: {backend.rsplit(".", 2)[-2]}.')
+
+    def check_graph_email(self):
+        """The Graph backend needs its Azure app registration details.
+
+        Only the settings are checked; ``manage.py graphcheck`` goes further and
+        asks Microsoft for a token.
+        """
+        from main.graph_mail import GraphEmailBackend, address_only
+
+        backend = GraphEmailBackend()
+        missing = backend.missing_settings()
+        if missing:
+            self.failures.append(
+                'Microsoft Graph email backend selected but '
+                + ', '.join(missing)
+                + ' is empty — no quote would ever leave the building.'
+            )
+            return
+        mailbox = backend.mailbox_for(None) if backend.sender else ''
+        if not mailbox:
+            mailbox = address_only(settings.DEFAULT_FROM_EMAIL)
+        if not mailbox:
+            self.failures.append(
+                'Microsoft Graph email backend selected but neither MS_GRAPH_SENDER '
+                'nor DEFAULT_FROM_EMAIL names a mailbox to send from.'
+            )
+            return
+        self.passes.append(f'Email backend: Microsoft Graph, sending as {mailbox}.')
+        self.warnings.append(
+            'Run "manage.py graphcheck --to you@inkprosamoa.com" to confirm the Graph '
+            'credentials actually work.'
+        )
 
     def check_site_url(self):
         url = settings.SITE_URL

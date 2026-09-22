@@ -28,6 +28,12 @@ env = environ.Env(
     EMAIL_HOST_USER=(str, ''),
     EMAIL_HOST_PASSWORD=(str, ''),
     EMAIL_USE_TLS=(bool, True),
+    MS_GRAPH_TENANT_ID=(str, ''),
+    MS_GRAPH_CLIENT_ID=(str, ''),
+    MS_GRAPH_CLIENT_SECRET=(str, ''),
+    MS_GRAPH_SENDER=(str, ''),
+    MS_GRAPH_SAVE_TO_SENT_ITEMS=(bool, True),
+    MS_GRAPH_TIMEOUT=(int, 20),
     DEFAULT_FROM_EMAIL=(str, 'InkPro <quotes@inkpro.example>'),
     STAFF_NOTIFY_EMAILS=(list, ['quotes@inkpro.example']),
     SLACK_WEBHOOK_URL=(str, ''),
@@ -188,6 +194,18 @@ EMAIL_USE_TLS = env('EMAIL_USE_TLS')
 DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL')
 STAFF_NOTIFY_EMAILS = env('STAFF_NOTIFY_EMAILS')
 SLACK_WEBHOOK_URL = env('SLACK_WEBHOOK_URL')
+
+# Microsoft 365 sending via Graph (see main/graph_mail.py). Used only when
+# EMAIL_BACKEND is main.graph_mail.GraphEmailBackend; the EMAIL_HOST settings
+# above are ignored in that case. MS_GRAPH_SENDER is the mailbox messages are
+# sent from — it must be a real Microsoft 365 mailbox, and should match the
+# address in DEFAULT_FROM_EMAIL.
+MS_GRAPH_TENANT_ID = env('MS_GRAPH_TENANT_ID')
+MS_GRAPH_CLIENT_ID = env('MS_GRAPH_CLIENT_ID')
+MS_GRAPH_CLIENT_SECRET = env('MS_GRAPH_CLIENT_SECRET')
+MS_GRAPH_SENDER = env('MS_GRAPH_SENDER')
+MS_GRAPH_SAVE_TO_SENT_ITEMS = env('MS_GRAPH_SAVE_TO_SENT_ITEMS')
+MS_GRAPH_TIMEOUT = env('MS_GRAPH_TIMEOUT')
 
 # --- Celery ----------------------------------------------------------------
 # With no broker configured, ``main.tasks`` runs work inline so that a fresh
