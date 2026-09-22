@@ -2,7 +2,7 @@
 Django==6.1.1
 django-environ==0.14.0
 djangorestframework==3.18.1
-psycopg[binary]==3.2.3        # PostgreSQL driver (unused on SQLite)
+psycopg[binary]==3.2.13        # PostgreSQL driver (unused on SQLite)
 whitenoise==6.8.2             # static file serving behind Gunicorn
 
 # Documents & data
