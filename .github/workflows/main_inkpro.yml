@@ -63,4 +63,4 @@ jobs:
         with:
           app-name: 'inkpro'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_B276B0015A4644F999A89572DB2B21E1 }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_5BB26946D5FE4ACE81A421ADA06EA679 }}
