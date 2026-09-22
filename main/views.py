@@ -450,7 +450,59 @@ def profile(request):
 
 
 def health_check(request):
-    return HttpResponse('OK')
+    """Readiness probe, safe to expose publicly.
+
+    Reports whether the app can actually serve — not merely whether the process
+    is up. A deploy whose startup command was never set runs gunicorn directly,
+    skipping migrations, and then fails with "no such table" on the first page
+    that touches the database. This surfaces that in one request.
+
+    Deliberately names no hostnames, credentials or connection strings; it
+    reports which component is unhealthy, not how it is configured.
+    """
+    from django.db import connection
+    from django.db.migrations.executor import MigrationExecutor
+    from django.http import JsonResponse
+
+    checks = {}
+    healthy = True
+
+    try:
+        connection.ensure_connection()
+        checks['database'] = 'ok'
+    except Exception:
+        checks['database'] = 'unreachable'
+        healthy = False
+
+    if checks['database'] == 'ok':
+        try:
+            executor = MigrationExecutor(connection)
+            pending = executor.migration_plan(executor.loader.graph.leaf_nodes())
+            if pending:
+                checks['migrations'] = f'{len(pending)} pending'
+                healthy = False
+            else:
+                checks['migrations'] = 'applied'
+        except Exception:
+            checks['migrations'] = 'unknown'
+            healthy = False
+
+    if checks.get('migrations') == 'applied':
+        try:
+            checks['catalogue'] = (
+                'ok' if ServiceCategory.objects.exists() else 'empty — run bootstrap'
+            )
+            if checks['catalogue'] != 'ok':
+                healthy = False
+        except Exception:
+            checks['catalogue'] = 'unreadable'
+            healthy = False
+
+    checks['engine'] = connection.vendor
+    return JsonResponse(
+        {'status': 'ok' if healthy else 'degraded', 'checks': checks},
+        status=200 if healthy else 503,
+    )
 
 
 # --- password reset ---------------------------------------------------------

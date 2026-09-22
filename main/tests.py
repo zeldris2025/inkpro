@@ -1730,3 +1730,47 @@ class PsycopgWheelTests(TestCase):
             (major, minor, patch), (3, 2, 10),
             'psycopg[binary] must be >=3.2.10 for a cp314 wheel to exist.',
         )
+
+
+class HealthCheckTests(TestCase):
+    """The readiness probe has to distinguish "process is up" from "can serve".
+
+    A deploy whose startup command was never set runs gunicorn directly and
+    skips migrations; the site boots and then fails with "no such table" on the
+    first page that touches the database. The probe surfaces that in one
+    request, and is what a deployment is verified with.
+    """
+
+    def test_a_ready_site_reports_ok(self):
+        ServiceCategory.objects.create(name='Banners', slug='banners')
+        response = self.client.get(reverse('health_check'))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload['status'], 'ok')
+        self.assertEqual(payload['checks']['database'], 'ok')
+        self.assertEqual(payload['checks']['migrations'], 'applied')
+        self.assertEqual(payload['checks']['catalogue'], 'ok')
+
+    def test_an_unseeded_site_is_degraded_not_ok(self):
+        # Migrated but never bootstrapped: no services would be listed.
+        response = self.client.get(reverse('health_check'))
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['status'], 'degraded')
+        self.assertIn('empty', response.json()['checks']['catalogue'])
+
+    def test_it_names_the_database_engine(self):
+        # "sqlite" in production means the managed server was never found.
+        ServiceCategory.objects.create(name='Banners', slug='banners')
+        self.assertIn('engine', self.client.get(reverse('health_check')).json()['checks'])
+
+    def test_it_leaks_no_connection_details(self):
+        from django.conf import settings
+
+        ServiceCategory.objects.create(name='Banners', slug='banners')
+        body = self.client.get(reverse('health_check')).content.decode()
+        for secret in (settings.SECRET_KEY, str(settings.DATABASES['default'].get('PASSWORD') or 'x' * 40)):
+            self.assertNotIn(secret, body)
+        for key in ('HOST', 'USER', 'NAME'):
+            value = settings.DATABASES['default'].get(key)
+            if value and len(str(value)) > 6:
+                self.assertNotIn(str(value), body)

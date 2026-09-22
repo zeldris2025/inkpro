@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}InkPro — Think Ink, Think Pro{% endblock %}</title>
 <meta name="description" content="{% block description %}InkPro: banners, stickers, vehicle graphics, canvas prints and custom branded merch. Think Ink, Think Pro.{% endblock %}">
-{% if FAVICON_URL %}<link rel="icon" type="image/png" href="{{ FAVICON_URL }}">
-<link rel="apple-touch-icon" href="{{ FAVICON_URL }}">{% endif %}
+{% if FAVICON_ICO_URL %}<link rel="icon" href="{{ FAVICON_ICO_URL }}" sizes="16x16 32x32 48x48">{% endif %}
+{% if FAVICON_SMALL_URL %}<link rel="icon" type="image/png" sizes="32x32" href="{{ FAVICON_SMALL_URL }}">{% endif %}
+{% if FAVICON_URL %}<link rel="icon" type="image/png" sizes="512x512" href="{{ FAVICON_URL }}">{% endif %}
+{% if APPLE_TOUCH_ICON_URL %}<link rel="apple-touch-icon" href="{{ APPLE_TOUCH_ICON_URL }}">{% endif %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">

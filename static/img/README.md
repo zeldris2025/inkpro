@@ -16,8 +16,17 @@ Re-run that command whenever the master artwork changes.
 | --- | --- | --- |
 | `inkpro-logo.png` | White footer, email, quote PDF | The light-background master, background removed and trimmed |
 | `inkpro-logo-on-dark.png` | Site header | The dark-background master, background removed and trimmed |
-| `favicon.png` | Browser tab | The splat alone, yellow on black — legible at 16px |
+| `favicon.png` | Manifests, link previews | The splat alone, yellow on black, 512px |
+| `favicon-32.png` | Browser tab, HiDPI | The same tile rendered at 32px rather than downscaled by the browser |
+| `favicon.ico` | Browser tab, `/favicon.ico` | 16/32/48 pack, for bookmarks and history entries |
+| `apple-touch-icon.png` | iOS home screen | The same tile at 180px |
 | `press-fallback.svg` | Homepage, when the 3D layer is declined | Hand-authored flat illustration; not generated |
+
+The splat cannot be separated from the wordmark cleanly — in the master
+artwork the script sits on top of it and the swoosh runs into it, so there is
+no gap to cut along. The favicon therefore takes a square window anchored to
+the lockup's right edge, a little wider than the mark is tall so the droplets
+are not sliced flat, and flood-fills the wordmark into one solid silhouette.
 
 ## Why variants are needed
 

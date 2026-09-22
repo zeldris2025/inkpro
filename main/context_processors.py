@@ -10,7 +10,13 @@ from .models import ServiceCategory
 #: dark site chrome needs the recoloured variant or the mark disappears.
 LOGO_ON_LIGHT = 'img/inkpro-logo.png'
 LOGO_ON_DARK = 'img/inkpro-logo-on-dark.png'
+#: Browser-tab icons. The 512px PNG is kept for manifests and link previews,
+#: but a tab that scales it down to 16px looks muddy, so a purpose-rendered
+#: 32px PNG and an .ico pack are offered ahead of it.
 FAVICON = 'img/favicon.png'
+FAVICON_SMALL = 'img/favicon-32.png'
+FAVICON_ICO = 'img/favicon.ico'
+APPLE_TOUCH_ICON = 'img/apple-touch-icon.png'
 
 TAGLINE = 'Think Ink, Think Pro'
 
@@ -21,6 +27,15 @@ def _static_if_present(path):
         if (directory / path).exists():
             return static(path)
     return None
+
+
+def favicon_ico_url():
+    """URL of the .ico pack, or the 512px PNG when it has not been built.
+
+    Resolved lazily by the URLconf, so that a missing icon cannot stop the
+    site booting.
+    """
+    return _static_if_present(FAVICON_ICO) or static(FAVICON)
 
 
 def absolute_logo_url(path=LOGO_ON_LIGHT):
@@ -47,6 +62,9 @@ def site_settings(request):
         'LOGO_URL': _static_if_present(LOGO_ON_DARK),
         'LOGO_ON_LIGHT_URL': _static_if_present(LOGO_ON_LIGHT),
         'FAVICON_URL': _static_if_present(FAVICON),
+        'FAVICON_SMALL_URL': _static_if_present(FAVICON_SMALL),
+        'FAVICON_ICO_URL': _static_if_present(FAVICON_ICO),
+        'APPLE_TOUCH_ICON_URL': _static_if_present(APPLE_TOUCH_ICON),
         'TAGLINE': TAGLINE,
         'ENABLE_3D_HERO': settings.ENABLE_3D_HERO,
         'LAUNCH_PROMO_ENABLED': settings.LAUNCH_PROMO_ENABLED,

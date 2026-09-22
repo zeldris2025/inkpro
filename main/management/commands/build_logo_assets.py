@@ -30,6 +30,22 @@ BACKGROUND_TOLERANCE = 32
 #: Anything at or below this on all channels counts as the black artwork.
 DARK_THRESHOLD = 110
 BRAND_YELLOW = (255, 210, 0)
+#: The favicon tile's background, matching the site chrome.
+TILE_BLACK = (10, 10, 10)
+#: Favicon crop width, as a multiple of the lockup's height. The splat's
+#: droplets spread wider than they do high, so a bare square slices them flat.
+SPLAT_WINDOW = 1.2
+#: Clear space around the splat, as a fraction of its longest side.
+FAVICON_PADDING = 0.14
+#: Sizes written for the browser tab. The large PNG alone looks muddy in a
+#: 16px tab, because the browser's downscale is cruder than Pillow's.
+FAVICON_PNGS = {
+    'favicon.png': 512,          # PWA manifests, link previews, the fallback
+    'favicon-32.png': 32,        # the tab itself on a HiDPI display
+    'apple-touch-icon.png': 180,  # iOS home screen
+}
+#: Sizes packed into favicon.ico, for the browsers that ask for /favicon.ico.
+FAVICON_ICO_SIZES = [(16, 16), (32, 32), (48, 48)]
 
 
 class Command(BaseCommand):
@@ -87,8 +103,19 @@ class Command(BaseCommand):
                 self.style.WARNING(f'  ! no dark master at {on_dark}; kept the existing one')
             )
 
-        self._build_favicon(light).save(out_dir / 'favicon.png')
-        self.stdout.write(self.style.SUCCESS('  ✓ favicon.png — splat, yellow on black'))
+        for name, size in FAVICON_PNGS.items():
+            self._build_favicon(light, size).save(out_dir / name)
+        self.stdout.write(
+            self.style.SUCCESS(
+                '  ✓ ' + ', '.join(FAVICON_PNGS) + ' — splat, yellow on black'
+            )
+        )
+        # Pillow downsamples the source itself when writing the .ico, so hand it
+        # the largest size we need and let it build the rest of the pack.
+        self._build_favicon(light, max(s for s, _ in FAVICON_ICO_SIZES)).save(
+            out_dir / 'favicon.ico', sizes=FAVICON_ICO_SIZES
+        )
+        self.stdout.write(self.style.SUCCESS('  ✓ favicon.ico — 16/32/48 pack'))
         self.stdout.write(self.style.SUCCESS(f'\nWrote logo assets to {out_dir}'))
 
     def _prepare(self, Image, path, label):
@@ -172,15 +199,20 @@ class Command(BaseCommand):
                     pixels[x, y] = (*colour, alpha)
         return image
 
-    def _build_favicon(self, logo, size=512):
+    def _build_favicon(self, logo, size):
         """Square yellow-on-black ink splat, lifted from the master artwork.
 
         The full lockup is illegible at 16px, so the favicon uses the splat
-        alone — the most recognisable fragment of the mark. The splat is
-        isolated by dropping the tagline (found via the blank row between it
-        and the lockup) and cropping to the right of the script wordmark, then
-        flood-filling from the corners so the wordmark sitting on top of the
-        splat is absorbed into a single solid silhouette.
+        alone — the most recognisable fragment of the mark. The tagline is
+        dropped at the blank row beneath the lockup, then a square window is
+        taken from the right-hand edge: the splat is the rightmost, tallest
+        element, so anchoring there captures it whole. The window is a little
+        wider than the mark is tall (``SPLAT_WINDOW``) because the splat's
+        droplets spread wider than they do high — cropping to the bare height
+        slices them flat. Flood-filling from the corners absorbs the wordmark
+        that sits on top of the splat into a single solid silhouette, and the
+        result is trimmed and re-padded so the mark never touches the tile
+        edge at any size.
         """
         from PIL import Image, ImageDraw
 
@@ -196,8 +228,10 @@ class Command(BaseCommand):
             int(height * 0.72),
         )
 
-        left = int(width * 0.52)
-        silhouette = alpha.crop((left, 0, width, split))
+        mark = alpha.crop((0, 0, width, split))
+        mark_width, mark_height = mark.size
+        window = min(mark_width, int(mark_height * SPLAT_WINDOW))
+        silhouette = mark.crop((mark_width - window, 0, mark_width, mark_height))
 
         flood = silhouette.copy()
         for corner in [
@@ -211,10 +245,11 @@ class Command(BaseCommand):
             except (ValueError, IndexError):  # pragma: no cover - corner already set
                 pass
         filled = flood.point(lambda v: 0 if v == 128 else 255)
+        filled = filled.crop(filled.getbbox() or (0, 0, *filled.size))
 
-        pad = int(max(filled.size) * 0.10)
+        pad = int(max(filled.size) * FAVICON_PADDING)
         side = max(filled.size) + pad * 2
-        canvas = Image.new('RGBA', (side, side), (10, 10, 10, 255))
+        canvas = Image.new('RGBA', (side, side), (*TILE_BLACK, 255))
         yellow = Image.new('RGBA', filled.size, (*BRAND_YELLOW, 255))
         canvas.paste(
             yellow,

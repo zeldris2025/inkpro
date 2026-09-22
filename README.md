@@ -500,11 +500,33 @@ It fails outright on SQLite for exactly this reason.
 
 ### 3. Startup command
 
-Set the App Service startup command to:
+Set the App Service startup command — **this is the step whose absence causes
+`no such table`**, because without it App Service auto-detects Django and runs
+gunicorn directly, skipping migrations, seeding and `collectstatic`:
 
+```bash
+az webapp config set --name inkpro --resource-group inkpro-rg \
+  --startup-file "bash /home/site/wwwroot/startup.sh"
 ```
-bash /home/site/wwwroot/startup.sh
+
+Or in the portal: **Configuration → General settings → Startup Command**.
+
+Then confirm it took effect:
+
+```bash
+curl https://inkprosamoa.com/health/
 ```
+
+```json
+{"status": "ok", "checks": {"database": "ok", "migrations": "applied",
+                            "catalogue": "ok", "engine": "postgresql"}}
+```
+
+Anything else is actionable: `"engine": "sqlite"` means the Postgres server was
+not found, `"migrations": "N pending"` means the startup command is not
+running, and `"catalogue": "empty"` means the seed has not run. The endpoint
+returns 503 while degraded, so it also works as the App Service health check
+path.
 
 [`startup.sh`](startup.sh) installs WeasyPrint's native libraries, creates the
 persistent media directory, migrates, seeds the catalogue, runs

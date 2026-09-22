@@ -2,6 +2,16 @@
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 # More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
 
+# NOTE: this workflow deploys the code but cannot configure the App Service.
+# Two settings must be set once, in the portal or with `az`, or the deploy will
+# come up half-working:
+#   * Startup Command  -> bash /home/site/wwwroot/startup.sh
+#     (without it App Service runs gunicorn directly and never migrates, seeds
+#      or collects static files — the site then fails with "no such table")
+#   * WEBSITES_ENABLE_APP_SERVICE_STORAGE=true  (keeps /home persistent)
+# Verify a deploy with:  curl https://inkprosamoa.com/health/
+# See the "Deploying to Azure App Service" section of README.md.
+
 name: Build and deploy Python app to Azure Web App - inkpro
 
 on:

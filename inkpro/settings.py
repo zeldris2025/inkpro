@@ -47,7 +47,28 @@ environ.Env.read_env(BASE_DIR / '.env')
 SECRET_KEY = env('SECRET_KEY')
 DEBUG = env('DEBUG')
 ALLOWED_HOSTS = env('ALLOWED_HOSTS')
+# Django 4+ rejects any POST whose Origin header is not listed here, so an
+# unset CSRF_TRUSTED_ORIGINS breaks every form behind HTTPS. Derive the origins
+# from the hosts we already trust rather than relying on a second env var.
 CSRF_TRUSTED_ORIGINS = env('CSRF_TRUSTED_ORIGINS')
+
+
+def _trust_origin(origin):
+    if origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(origin)
+
+
+for _host in (h.strip().lstrip('.') for h in ALLOWED_HOSTS):
+    if not _host or _host == '*':
+        continue
+    _scheme = 'http' if _host in ('localhost', '127.0.0.1', '[::1]') else 'https'
+    _trust_origin(f'{_scheme}://{_host}')
+    if '.' in _host and not _host.startswith(('www.', '*.')):
+        _trust_origin(f'{_scheme}://www.{_host}')
+
+_site_url = env('SITE_URL').rstrip('/')
+if _site_url.startswith(('http://', 'https://')):
+    _trust_origin(_site_url)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
