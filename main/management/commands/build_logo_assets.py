@@ -32,11 +32,8 @@ DARK_THRESHOLD = 110
 BRAND_YELLOW = (255, 210, 0)
 #: The favicon tile's background, matching the site chrome.
 TILE_BLACK = (10, 10, 10)
-#: Favicon crop width, as a multiple of the lockup's height. The splat's
-#: droplets spread wider than they do high, so a bare square slices them flat.
-SPLAT_WINDOW = 1.2
-#: Clear space around the splat, as a fraction of its longest side.
-FAVICON_PADDING = 0.14
+#: Clear space around the mark, as a fraction of its longest side.
+FAVICON_PADDING = 0.06
 #: Sizes written for the browser tab. The large PNG alone looks muddy in a
 #: 16px tab, because the browser's downscale is cruder than Pillow's.
 FAVICON_PNGS = {
@@ -99,20 +96,24 @@ class Command(BaseCommand):
                 self.style.SUCCESS('  ✓ inkpro-logo-on-dark.png — for the black header')
             )
         else:
+            dark = None
             self.stdout.write(
                 self.style.WARNING(f'  ! no dark master at {on_dark}; kept the existing one')
             )
 
+        # The tab sits on browser chrome, not on the page, so the favicon uses
+        # the dark master: yellow mark on its own black tile.
+        icon_source = dark if dark is not None else light
         for name, size in FAVICON_PNGS.items():
-            self._build_favicon(light, size).save(out_dir / name)
+            self._build_favicon(icon_source, size).save(out_dir / name)
         self.stdout.write(
             self.style.SUCCESS(
-                '  ✓ ' + ', '.join(FAVICON_PNGS) + ' — splat, yellow on black'
+                '  ✓ ' + ', '.join(FAVICON_PNGS) + ' — the InkPro lockup on black'
             )
         )
         # Pillow downsamples the source itself when writing the .ico, so hand it
         # the largest size we need and let it build the rest of the pack.
-        self._build_favicon(light, max(s for s, _ in FAVICON_ICO_SIZES)).save(
+        self._build_favicon(icon_source, max(s for s, _ in FAVICON_ICO_SIZES)).save(
             out_dir / 'favicon.ico', sizes=FAVICON_ICO_SIZES
         )
         self.stdout.write(self.style.SUCCESS('  ✓ favicon.ico — 16/32/48 pack'))
@@ -200,60 +201,40 @@ class Command(BaseCommand):
         return image
 
     def _build_favicon(self, logo, size):
-        """Square yellow-on-black ink splat, lifted from the master artwork.
+        """The InkPro lockup itself, centred on a square black tile.
 
-        The full lockup is illegible at 16px, so the favicon uses the splat
-        alone — the most recognisable fragment of the mark. The tagline is
-        dropped at the blank row beneath the lockup, then a square window is
-        taken from the right-hand edge: the splat is the rightmost, tallest
-        element, so anchoring there captures it whole. The window is a little
-        wider than the mark is tall (``SPLAT_WINDOW``) because the splat's
-        droplets spread wider than they do high — cropping to the bare height
-        slices them flat. Flood-filling from the corners absorbs the wordmark
-        that sits on top of the splat into a single solid silhouette, and the
-        result is trimmed and re-padded so the mark never touches the tile
-        edge at any size.
+        The tagline is dropped at the first blank row beneath the lockup — it
+        is unreadable long before the tab size is reached — but everything
+        above it is kept as drawn, script and splat together, so the tab shows
+        the logo rather than an anonymous shape. The mark is wider than it is
+        tall, so it is centred on a square tile with a little clear space
+        rather than cropped to fit.
         """
-        from PIL import Image, ImageDraw
+        from PIL import Image
 
+        mark = self._trim(self._drop_tagline(logo))
+        pad = int(max(mark.size) * FAVICON_PADDING)
+        side = max(mark.size) + pad * 2
+
+        canvas = Image.new('RGBA', (side, side), (*TILE_BLACK, 255))
+        canvas.alpha_composite(
+            mark, ((side - mark.size[0]) // 2, (side - mark.size[1]) // 2)
+        )
+        return canvas.resize((size, size), Image.LANCZOS)
+
+    def _drop_tagline(self, logo):
+        """Cut the artwork at the first blank row below its midpoint.
+
+        The lockup and the "Think Ink, Think Pro" tagline are separated by a
+        band of clear space; anything below that band is tagline.
+        """
         width, height = logo.size
         alpha = logo.getchannel('A').point(lambda v: 255 if v > 40 else 0)
-
-        # First fully blank row below the midpoint separates mark from tagline.
         row_counts = [
             sum(alpha.crop((0, y, width, y + 1)).getdata()) for y in range(height)
         ]
         split = next(
             (y for y, count in enumerate(row_counts) if count == 0 and y > height * 0.5),
-            int(height * 0.72),
+            height,
         )
-
-        mark = alpha.crop((0, 0, width, split))
-        mark_width, mark_height = mark.size
-        window = min(mark_width, int(mark_height * SPLAT_WINDOW))
-        silhouette = mark.crop((mark_width - window, 0, mark_width, mark_height))
-
-        flood = silhouette.copy()
-        for corner in [
-            (0, 0),
-            (flood.size[0] - 1, 0),
-            (0, flood.size[1] - 1),
-            (flood.size[0] - 1, flood.size[1] - 1),
-        ]:
-            try:
-                ImageDraw.floodfill(flood, corner, 128, thresh=10)
-            except (ValueError, IndexError):  # pragma: no cover - corner already set
-                pass
-        filled = flood.point(lambda v: 0 if v == 128 else 255)
-        filled = filled.crop(filled.getbbox() or (0, 0, *filled.size))
-
-        pad = int(max(filled.size) * FAVICON_PADDING)
-        side = max(filled.size) + pad * 2
-        canvas = Image.new('RGBA', (side, side), (*TILE_BLACK, 255))
-        yellow = Image.new('RGBA', filled.size, (*BRAND_YELLOW, 255))
-        canvas.paste(
-            yellow,
-            ((side - filled.size[0]) // 2, (side - filled.size[1]) // 2),
-            filled,
-        )
-        return canvas.resize((size, size), Image.LANCZOS)
+        return logo.crop((0, 0, width, split))
