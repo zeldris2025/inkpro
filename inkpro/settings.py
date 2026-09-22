@@ -10,6 +10,8 @@ from pathlib import Path
 
 import environ
 
+from .database import resolve_database_url
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 env = environ.Env(
@@ -102,7 +104,14 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'inkpro.wsgi.application'
 
-DATABASES = {'default': env.db('DATABASE_URL')}
+# Azure's Service Connector injects AZURE_POSTGRESQL_* rather than
+# DATABASE_URL, so reading only DATABASE_URL would fall back to SQLite on a
+# correctly-provisioned App Service — and then fail with "no such table".
+DATABASES = {
+    'default': env.db_url_config(
+        resolve_database_url(default=f'sqlite:///{BASE_DIR / "db.sqlite3"}')
+    )
+}
 DATABASES['default'].setdefault('ATOMIC_REQUESTS', False)
 
 # Reusing connections matters on a managed Postgres: opening one per request

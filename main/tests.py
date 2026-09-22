@@ -1612,3 +1612,121 @@ class ProductionReadinessTests(TestCase):
         env = environ.Env(MEDIA_ROOT=(str, ''))
         self.assertEqual(env('MEDIA_ROOT'), '')  # default falls back to BASE_DIR/media
         self.assertIn('MEDIA_ROOT', pathlib.Path('inkpro/settings.py').read_text())
+
+
+class AzureDatabaseResolutionTests(TestCase):
+    """Find the database however the host wired it up.
+
+    Attaching PostgreSQL to an App Service through the portal does not set
+    DATABASE_URL — it injects AZURE_POSTGRESQL_* instead. Reading only
+    DATABASE_URL made the app fall back to SQLite on a correctly-provisioned
+    server, which surfaced as "no such table: main_invoice" on every page that
+    touches the database.
+    """
+
+    def config(self, environ):
+        import environ as django_environ
+
+        from inkpro.database import resolve_database_url
+
+        dsn = resolve_database_url(environ=environ, default='sqlite:///fallback.db')
+        return django_environ.Env().db_url_config(dsn)
+
+    def test_database_url_takes_precedence(self):
+        config = self.config({
+            'DATABASE_URL': 'postgres://u:p@explicit.example:5432/chosen',
+            'AZURE_POSTGRESQL_HOST': 'ignored.example',
+        })
+        self.assertEqual(config['HOST'], 'explicit.example')
+        self.assertEqual(config['NAME'], 'chosen')
+
+    def test_service_connector_libpq_keyword_string(self):
+        config = self.config({
+            'AZURE_POSTGRESQL_CONNECTIONSTRING':
+                'dbname=inkpro host=srv.postgres.database.azure.com port=5432 '
+                'sslmode=require user=admin password=secret',
+        })
+        self.assertTrue(config['ENGINE'].endswith('postgresql'))
+        self.assertEqual(config['HOST'], 'srv.postgres.database.azure.com')
+        self.assertEqual(config['NAME'], 'inkpro')
+        self.assertEqual(config['USER'], 'admin')
+
+    def test_service_connector_url_form(self):
+        config = self.config({
+            'AZURE_POSTGRESQL_CONNECTIONSTRING':
+                'postgresql://u:p@srv.postgres.database.azure.com:5432/inkpro',
+        })
+        self.assertEqual(config['NAME'], 'inkpro')
+
+    def test_individual_azure_variables(self):
+        config = self.config({
+            'AZURE_POSTGRESQL_HOST': 'srv.postgres.database.azure.com',
+            'AZURE_POSTGRESQL_DATABASE': 'inkpro',
+            'AZURE_POSTGRESQL_USER': 'admin',
+            'AZURE_POSTGRESQL_PASSWORD': 'secret',
+        })
+        self.assertEqual(config['HOST'], 'srv.postgres.database.azure.com')
+        self.assertEqual(config['NAME'], 'inkpro')
+
+    def test_legacy_app_service_connection_string(self):
+        config = self.config({
+            'POSTGRESQLCONNSTR_DATABASE_URL':
+                'dbname=inkpro host=h.postgres.database.azure.com user=u password=p',
+        })
+        self.assertEqual(config['NAME'], 'inkpro')
+
+    def test_credentials_with_special_characters_survive(self):
+        """Azure-generated passwords routinely contain @ : / and +, which break
+        a DSN unless they are percent-encoded on the way in."""
+        config = self.config({
+            'AZURE_POSTGRESQL_HOST': 'srv.postgres.database.azure.com',
+            'AZURE_POSTGRESQL_DATABASE': 'inkpro',
+            'AZURE_POSTGRESQL_USER': 'admin',
+            'AZURE_POSTGRESQL_PASSWORD': 'p@ss/w:rd+123',
+        })
+        self.assertEqual(config['PASSWORD'], 'p@ss/w:rd+123')
+
+    def test_quoted_libpq_password_is_unwrapped(self):
+        config = self.config({
+            'AZURE_POSTGRESQL_CONNECTIONSTRING':
+                "host=h.postgres.database.azure.com dbname=inkpro user=u "
+                "password='pa ss@word' sslmode=require",
+        })
+        self.assertEqual(config['PASSWORD'], 'pa ss@word')
+
+    def test_ssl_is_required_by_default(self):
+        """Azure Database for PostgreSQL refuses plaintext connections."""
+        config = self.config({
+            'AZURE_POSTGRESQL_HOST': 'srv.postgres.database.azure.com',
+            'AZURE_POSTGRESQL_DATABASE': 'inkpro',
+            'AZURE_POSTGRESQL_USER': 'u',
+            'AZURE_POSTGRESQL_PASSWORD': 'p',
+        })
+        self.assertEqual(config['OPTIONS']['sslmode'], 'require')
+
+    def test_falls_back_to_the_default_when_nothing_is_configured(self):
+        self.assertTrue(self.config({})['ENGINE'].endswith('sqlite3'))
+
+    def test_incomplete_azure_variables_do_not_produce_a_broken_dsn(self):
+        # A host with no database name is not enough to connect; better to fall
+        # back than to build a DSN that fails obscurely.
+        config = self.config({'AZURE_POSTGRESQL_HOST': 'srv.postgres.database.azure.com'})
+        self.assertTrue(config['ENGINE'].endswith('sqlite3'))
+
+
+class PsycopgWheelTests(TestCase):
+    """The pinned psycopg must be installable on the deployment runtime."""
+
+    def test_psycopg_pin_has_cp314_wheels(self):
+        """Azure App Service runs Python 3.14; psycopg-binary only began
+        shipping cp314 wheels at 3.2.10, so an earlier pin cannot install."""
+        from django.conf import settings
+
+        requirements = (pathlib.Path(settings.BASE_DIR) / 'requirements.txt').read_text()
+        match = re.search(r'psycopg\[binary\]==(\d+)\.(\d+)\.(\d+)', requirements)
+        self.assertIsNotNone(match, 'psycopg pin not found in requirements.txt')
+        major, minor, patch = (int(part) for part in match.groups())
+        self.assertGreaterEqual(
+            (major, minor, patch), (3, 2, 10),
+            'psycopg[binary] must be >=3.2.10 for a cp314 wheel to exist.',
+        )

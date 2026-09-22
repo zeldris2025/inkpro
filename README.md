@@ -459,6 +459,11 @@ az webapp up --name inkpro --resource-group inkpro-rg \
   --runtime "PYTHON:3.12" --sku B1
 ```
 
+> **Runtime matters for the driver.** On Python 3.14, `psycopg[binary]` must be
+> at least 3.2.10 — earlier releases ship no cp314 wheel and the install fails
+> with *"No matching distribution found for psycopg-binary"*. The pin in
+> `requirements.txt` satisfies this, and a test enforces it.
+
 ### 2. Configure
 
 Set everything from [`.env.production.example`](.env.production.example) as
@@ -475,6 +480,23 @@ Two platform settings are easy to miss and both cause data loss:
 | --- | --- |
 | `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` | Without it `/home` is not persistent and every uploaded file vanishes on restart |
 | `SCM_DO_BUILD_DURING_DEPLOYMENT=true` | Without it Oryx never installs `requirements.txt` |
+
+### 2b. If you attached Postgres through the portal
+
+Azure's **Service Connector** does not set `DATABASE_URL` — it injects its own
+variables (`AZURE_POSTGRESQL_CONNECTIONSTRING`, or a set of
+`AZURE_POSTGRESQL_HOST`/`USER`/`PASSWORD`/`DATABASE`). The app reads all of
+those, so an attached server is picked up with no extra configuration.
+
+If it is *not* picked up, the app falls back to SQLite on a disk that a deploy
+replaces — which shows up as **`no such table: main_invoice`** on any page that
+touches the database. Confirm which database is actually in use with:
+
+```bash
+python manage.py deploycheck
+```
+
+It fails outright on SQLite for exactly this reason.
 
 ### 3. Startup command
 
@@ -528,6 +550,24 @@ does not permit it, the app still starts and quotes are emailed as HTML
 attachments instead of PDFs — `deploycheck` reports this as a warning, not a
 failure. If PDFs are essential, deploy the [`Dockerfile`](Dockerfile) to App
 Service for Containers instead; it installs the stack at build time.
+
+---
+
+## Troubleshooting a deployment
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `no such table: main_invoice` | Running on SQLite — the database was never found, or migrations never ran | Check `deploycheck`; make sure the startup command is set so `migrate` runs |
+| `No matching distribution found for psycopg-binary` | Pin predates cp314 wheels | Requires `psycopg[binary]>=3.2.10` |
+| Site loads but every image is broken | Media not served, or never imported | `deploycheck` reports both; `startup.sh` re-imports photos each boot |
+| Stylesheets 500 | `collectstatic` has not run under manifest storage | `startup.sh` runs it; check the build log |
+| Quotes arrive as `.html` not `.pdf` | WeasyPrint's native libraries are missing | Expected on the Python runtime; deploy the container image for real PDFs |
+| Quote accept links point at localhost | `SITE_URL` not set | Set `SITE_URL=https://inkprosamoa.com` |
+| Emails never arrive | Console email backend still active | Set the SMTP variables |
+
+The most common cause of a half-working deploy is the **startup command not
+being set**: App Service then auto-detects Django and runs gunicorn directly,
+skipping migrations, the seed and `collectstatic` entirely.
 
 ---
 
