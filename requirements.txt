@@ -1,5 +1,9 @@
 # Core
-Django==6.1.1
+# Pinned to the 5.2 LTS line (supported to April 2028) because Django 6.x
+# requires PostgreSQL 15+, and the production database is on 14. Bump this
+# once that server has been upgraded — nothing in the codebase uses a 6.x
+# feature.
+Django==5.2.17
 django-environ==0.14.0
 djangorestframework==3.18.1
 psycopg[binary]==3.2.13        # PostgreSQL driver (unused on SQLite)

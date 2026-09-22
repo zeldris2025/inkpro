@@ -452,7 +452,7 @@ PostgreSQL** + the domain **inkprosamoa.com**.
 az postgres flexible-server create \
   --name inkpro-db --resource-group inkpro-rg \
   --location australiaeast --tier Burstable --sku-name Standard_B1ms \
-  --database-name inkpro --public-access 0.0.0.0
+  --database-name inkpro --public-access 0.0.0.0 --version 16
 
 # App Service
 az webapp up --name inkpro --resource-group inkpro-rg \
@@ -480,6 +480,25 @@ Two platform settings are easy to miss and both cause data loss:
 | --- | --- |
 | `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` | Without it `/home` is not persistent and every uploaded file vanishes on restart |
 | `SCM_DO_BUILD_DURING_DEPLOYMENT=true` | Without it Oryx never installs `requirements.txt` |
+
+**Pass `--version` explicitly.** Azure's default major version trails the
+current release, and the server version caps which Django the app can run:
+Django 6.x needs PostgreSQL 15 or later, and starting on an older default is
+what pinned `requirements.txt` to the 5.2 LTS line. A server already on 14
+reports `NotSupportedError: PostgreSQL 15 or later is required` the moment the
+app touches the database. Check and upgrade in place with:
+
+```bash
+az postgres flexible-server show \
+  --name inkpro-db --resource-group inkpro-rg --query version
+
+# Major-version upgrades take the server offline and cannot be rolled back.
+az postgres flexible-server upgrade \
+  --name inkpro-db --resource-group inkpro-rg --version 16
+```
+
+Once the server is on 15+, `Django==5.2.17` in `requirements.txt` can go back
+to the current release.
 
 ### 2b. If you attached Postgres through the portal
 
