@@ -11,6 +11,7 @@ from pathlib import Path
 import environ
 
 from .database import resolve_database_url
+from .origins import trusted_origins
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -47,28 +48,10 @@ environ.Env.read_env(BASE_DIR / '.env')
 SECRET_KEY = env('SECRET_KEY')
 DEBUG = env('DEBUG')
 ALLOWED_HOSTS = env('ALLOWED_HOSTS')
-# Django 4+ rejects any POST whose Origin header is not listed here, so an
-# unset CSRF_TRUSTED_ORIGINS breaks every form behind HTTPS. Derive the origins
-# from the hosts we already trust rather than relying on a second env var.
-CSRF_TRUSTED_ORIGINS = env('CSRF_TRUSTED_ORIGINS')
-
-
-def _trust_origin(origin):
-    if origin not in CSRF_TRUSTED_ORIGINS:
-        CSRF_TRUSTED_ORIGINS.append(origin)
-
-
-for _host in (h.strip().lstrip('.') for h in ALLOWED_HOSTS):
-    if not _host or _host == '*':
-        continue
-    _scheme = 'http' if _host in ('localhost', '127.0.0.1', '[::1]') else 'https'
-    _trust_origin(f'{_scheme}://{_host}')
-    if '.' in _host and not _host.startswith(('www.', '*.')):
-        _trust_origin(f'{_scheme}://www.{_host}')
-
-_site_url = env('SITE_URL').rstrip('/')
-if _site_url.startswith(('http://', 'https://')):
-    _trust_origin(_site_url)
+# A host trusted to serve the site is trusted to post to it; see origins.py.
+CSRF_TRUSTED_ORIGINS = trusted_origins(
+    ALLOWED_HOSTS, env('SITE_URL'), env('CSRF_TRUSTED_ORIGINS')
+)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -253,6 +236,15 @@ REST_FRAMEWORK = {
     ],
 }
 
+# Deliberately outside the `not DEBUG` block below. The host terminates TLS and
+# forwards to gunicorn over plain HTTP, so without this Django believes every
+# request is insecure. It then derives the request's "good origin" as
+# http://<host> and rejects the browser's https:// Origin header, which surfaces
+# as "Origin checking failed — https://… does not match any trusted origins" on
+# every form POST. Tying that to DEBUG meant one unset environment variable
+# broke every form on the site, which is too sharp an edge to leave in place.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 if not DEBUG:  # pragma: no cover - production hardening
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
@@ -260,4 +252,3 @@ if not DEBUG:  # pragma: no cover - production hardening
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

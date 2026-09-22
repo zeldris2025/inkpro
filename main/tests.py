@@ -1531,6 +1531,69 @@ class DependencyDeclarationTests(TestCase):
 class ProductionReadinessTests(TestCase):
     """Guards for the things that only break once the site is deployed."""
 
+    def test_the_proxy_ssl_header_is_set_regardless_of_debug(self):
+        """The host terminates TLS and forwards over plain HTTP. Without this
+        setting Django reads every request as insecure, builds the request's
+        good origin as http://<host>, and rejects the browser's https:// Origin
+        on every form POST — the "does not match any trusted origins" 403.
+
+        It used to sit inside the `if not DEBUG:` block, so a single unset
+        environment variable took out every form on the site."""
+        from django.conf import settings
+
+        self.assertEqual(
+            settings.SECURE_PROXY_SSL_HEADER,
+            ('HTTP_X_FORWARDED_PROTO', 'https'),
+        )
+
+    @override_settings(DEBUG=True, ALLOWED_HOSTS=['*'], CSRF_TRUSTED_ORIGINS=[])
+    def test_an_https_origin_verifies_behind_the_proxy(self):
+        """Reproduces the production 403 end to end: nothing configured, a
+        request arriving over the proxy, and an https Origin header."""
+        from django.middleware.csrf import CsrfViewMiddleware
+
+        request = RequestFactory().post(
+            '/quote/',
+            HTTP_HOST='inkprosamoa.com',
+            HTTP_ORIGIN='https://inkprosamoa.com',
+            HTTP_X_FORWARDED_PROTO='https',
+        )
+        middleware = CsrfViewMiddleware(lambda r: None)
+        self.assertTrue(request.is_secure())
+        self.assertTrue(middleware._origin_verified(request))
+
+    def test_the_site_host_is_a_trusted_csrf_origin(self):
+        """CSRF_TRUSTED_ORIGINS is derived from ALLOWED_HOSTS, so that trusting
+        a host to serve the site also trusts it as a form origin."""
+        from inkpro.origins import trusted_origins
+
+        derived = trusted_origins(
+            ['inkprosamoa.com', 'inkpro.azurewebsites.net'],
+            site_url='https://inkprosamoa.com',
+        )
+        self.assertIn('https://inkprosamoa.com', derived)
+        self.assertIn('https://www.inkprosamoa.com', derived)
+        self.assertIn('https://inkpro.azurewebsites.net', derived)
+
+    def test_a_wildcard_host_yields_no_origin(self):
+        """'*' says nothing about which origin to trust, so it must not become
+        one — and an explicit setting is still honoured."""
+        from inkpro.origins import trusted_origins
+
+        self.assertEqual(trusted_origins(['*']), [])
+        self.assertEqual(
+            trusted_origins(['*'], configured=['https://inkprosamoa.com']),
+            ['https://inkprosamoa.com'],
+        )
+
+    def test_local_hosts_are_trusted_over_plain_http(self):
+        from inkpro.origins import trusted_origins
+
+        self.assertEqual(
+            trusted_origins(['localhost', '127.0.0.1']),
+            ['http://localhost', 'http://127.0.0.1'],
+        )
+
     def test_media_is_served_when_debug_is_off(self):
         """Django only routes MEDIA_URL when DEBUG is on. Without the media
         middleware every product photo and artwork upload 404s in production —

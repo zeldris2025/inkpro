@@ -43,6 +43,16 @@ echo "==> Seeding catalogue"
 python manage.py bootstrap --skip-images || echo "!! Catalogue seed reported errors (see above)"
 python manage.py import_ratecard_images || echo "!! Photo import failed — gallery will be empty"
 
+# --- Configuration -----------------------------------------------------------
+# App Service application settings reach the app as environment variables. When
+# they are missing the app does not fail — it quietly falls back to the
+# development defaults (DEBUG on, ALLOWED_HOSTS '*', SITE_URL localhost), and
+# the first symptom is a CSRF 403 on every form. Report that here rather than
+# leaving it to be discovered from the browser. Non-blocking: a warning should
+# not take the site down.
+echo "==> Checking deployment configuration"
+python manage.py deploycheck || echo "!! deploycheck reported blocking issues — see above."
+
 # --- Static files ------------------------------------------------------------
 echo "==> Collecting static files"
 python manage.py collectstatic --noinput
