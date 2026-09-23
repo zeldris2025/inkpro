@@ -73,6 +73,26 @@ def _post_json(url, payload, token, timeout):
     return json.loads(body) if body else None
 
 
+def graph_get(path, token, timeout=20):
+    """GET a Graph resource. Returns the decoded body.
+
+    Raises ``GraphError`` carrying Graph's own message, which is usually the
+    most specific account of what went wrong that anyone will get.
+    """
+    request = urllib.request.Request(
+        f'{GRAPH_HOST}/{path.lstrip("/")}',
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read() or b'{}')
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode('utf-8', 'replace')[:500]
+        raise GraphError(f'Graph GET {path} failed ({exc.code}): {detail}') from exc
+    except OSError as exc:
+        raise GraphError(f'Could not reach Microsoft Graph: {exc}') from exc
+
+
 class TokenCache:
     """Caches one app-only access token until shortly before it expires.
 

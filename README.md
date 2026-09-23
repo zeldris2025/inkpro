@@ -420,8 +420,8 @@ EMAIL_BACKEND=main.graph_mail.GraphEmailBackend
 MS_GRAPH_TENANT_ID=...
 MS_GRAPH_CLIENT_ID=...
 MS_GRAPH_CLIENT_SECRET=...
-MS_GRAPH_SENDER=sales@inkprosamoa.com
-DEFAULT_FROM_EMAIL=InkPro <sales@inkprosamoa.com>
+MS_GRAPH_SENDER=inkpro@ahliki.com
+DEFAULT_FROM_EMAIL=InkPro <inkpro@ahliki.com>
 ```
 
 `MS_GRAPH_SENDER` is the mailbox messages are sent from, and should match the
@@ -518,8 +518,34 @@ az webapp up --name inkpro --resource-group inkpro-rg \
 ### 2. Configure
 
 Set everything from [`.env.production.example`](.env.production.example) as
-App Service **Application settings** (not a `.env` file — App Service injects
-them as environment variables). Generate the secret key first:
+App Service environment variables (not a `.env` file — App Service injects them
+into the process). In the portal these live at:
+
+> your App Service → **Settings → Environment variables → App settings** tab →
+> **+ Add**, then **Apply** and confirm the restart.
+
+The portal used to call this **Configuration → Application settings**, and older
+guides — including earlier notes in this file — still use that name. It is the
+same thing; only the menu label changed. Each variable is one entry: name in
+the left box, value in the right, no quotes around the value.
+
+These replace `.env`, they do not duplicate it. `.env` is gitignored, so it is
+never deployed, and `.dockerignore` keeps it out of container images too. Where
+both exist, the real environment variable wins: `django-environ` reads `.env`
+without overwriting anything already set in the process.
+
+Or from the command line, which is faster for a batch of them:
+
+```bash
+az webapp config appsettings set --name inkpro --resource-group inkpro-rg \
+  --settings EMAIL_BACKEND=main.graph_mail.GraphEmailBackend \
+             MS_GRAPH_TENANT_ID=... \
+             MS_GRAPH_CLIENT_ID=... \
+             MS_GRAPH_CLIENT_SECRET=... \
+             MS_GRAPH_SENDER=inkpro@ahliki.com
+```
+
+Generate the secret key first:
 
 ```bash
 python manage.py generate_secret_key
@@ -579,7 +605,8 @@ az webapp config set --name inkpro --resource-group inkpro-rg \
   --startup-file "bash /home/site/wwwroot/startup.sh"
 ```
 
-Or in the portal: **Configuration → General settings → Startup Command**.
+Or in the portal: **Settings → Configuration → General settings → Startup
+Command** (on older portal versions, just **Configuration**).
 
 Then confirm it took effect:
 
@@ -632,12 +659,14 @@ its database row survives, leaving broken images and no record of what was
 lost.
 
 Because that loss is silent and permanent, the safe path is not left to an
-application setting somebody has to remember: [`inkpro/media.py`](inkpro/media.py)
-defaults `MEDIA_ROOT` to `/home/site/media` whenever the app is running on App
-Service from inside `wwwroot`. An explicit `MEDIA_ROOT` still wins, `deploycheck`
-*fails* if it points into the deployed tree, and `startup.sh` exports it too —
-three layers, because one forgotten setting used to be enough to lose every
-image.
+application setting somebody has to remember:
+[`inkpro/media.py`](inkpro/media.py) defaults `MEDIA_ROOT` to
+`/home/site/media` whenever the app runs on App Service from anywhere that is
+not persistent storage — which includes the `/tmp` directory an Oryx build
+extracts to, and `/app` in the container image. An explicit `MEDIA_ROOT` still
+wins, `deploycheck` *fails* if it points anywhere impermanent, and `startup.sh`
+exports it too — three layers, because one forgotten setting used to be enough
+to lose every image.
 
 `startup.sh` also re-imports the product photography from the committed rate
 card PDF on every boot, so the gallery is self-healing. To see what else is
@@ -668,6 +697,36 @@ Service for Containers instead; it installs the stack at build time.
 
 ---
 
+## Running commands on the live site
+
+Three ways in, all equivalent — they land in the same container as the running
+app, with the application settings already present as environment variables:
+
+- **Portal** — your App Service → **Development Tools → SSH** → *Go*.
+- **Browser, no portal** — `https://<your-app>.scm.azurewebsites.net/webssh/host`.
+- **Locally** — `az webapp ssh --name inkpro --resource-group inkpro-rg`.
+
+SSH drops you in `/` with neither the app directory nor its virtualenv active.
+On the Python runtime, Oryx extracts the app to `/tmp/<id>` and installs the
+packages into `/tmp/<id>/antenv`, while `/home/site/wwwroot` holds only the
+source — so `python manage.py ...` run from `wwwroot` fails with
+`ModuleNotFoundError: No module named 'django'` even though the code is plainly
+there. [`azureshell.sh`](azureshell.sh) finds the matching pair for you:
+
+```bash
+bash /home/site/wwwroot/azureshell.sh graphcheck          # email credentials
+bash /home/site/wwwroot/azureshell.sh graphcheck --to you@inkprosamoa.com
+bash /home/site/wwwroot/azureshell.sh mediacheck --verbose # missing uploads
+bash /home/site/wwwroot/azureshell.sh deploycheck          # whole environment
+bash /home/site/wwwroot/azureshell.sh                     # interactive shell
+```
+
+The SSH session is inside an ephemeral container: files written outside `/home`
+vanish on the next restart, and a `pip install` there does not survive either.
+Anything meant to persist belongs under `/home`.
+
+---
+
 ## Troubleshooting a deployment
 
 | Symptom | Cause | Fix |
@@ -680,6 +739,7 @@ Service for Containers instead; it installs the stack at build time.
 | Quotes arrive as `.html` not `.pdf` | WeasyPrint's native libraries are missing | Expected on the Python runtime; deploy the container image for real PDFs |
 | Quote accept links point at localhost | `SITE_URL` not set | Set `SITE_URL=https://inkprosamoa.com` |
 | Emails never arrive | Console email backend still active | Set the SMTP or `MS_GRAPH_*` variables |
+| `ModuleNotFoundError: No module named 'django'` over SSH | The Oryx virtualenv is not active in an SSH session | Use `bash /home/site/wwwroot/azureshell.sh <command>` |
 | Graph sends fail with 403 | `Mail.Send` consent missing, or an access policy excludes the mailbox | Re-check step 3 above, then `manage.py graphcheck` |
 | Graph sends fail with 401 | Client secret expired or mistyped (the *value*, not the ID) | Issue a new secret and update `MS_GRAPH_CLIENT_SECRET` |
 

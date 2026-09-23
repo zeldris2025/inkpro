@@ -1,0 +1,24 @@
+# Keep the image free of local-only files. Dockerfile does `COPY . .`, so
+# without this a developer's .env — client secret and all — would be baked into
+# an image layer and shipped to the registry.
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+.git
+.github
+.gitignore
+
+# Uploads and generated files belong on the host's persistent disk, never in
+# the image; see inkpro/media.py.
+media/
+staticfiles/
+db.sqlite3
+
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store

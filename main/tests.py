@@ -3,6 +3,7 @@ pricing arithmetic, quote status transitions and invoice balance derivation.
 """
 
 import base64
+import io
 import pathlib
 import re
 from decimal import Decimal
@@ -15,6 +16,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from main import pricing
+from main.graph_mail import GraphError
 from main.models import (
     CategoryImage,
     Customer,
@@ -2082,3 +2084,73 @@ class MediaCheckCommandTests(TestCase):
                 call_command('mediacheck', '--clear-missing', stdout=out)
                 category.refresh_from_db()
                 self.assertFalse(category.hero_image)
+
+
+class GraphCheckDiagnosticsTests(TestCase):
+    """graphcheck must name the cause when Graph rejects the mailbox."""
+
+    graph_settings = {
+        'MS_GRAPH_TENANT_ID': 'tenant-1',
+        'MS_GRAPH_CLIENT_ID': 'client-1',
+        'MS_GRAPH_CLIENT_SECRET': 'secret-1',
+        'MS_GRAPH_SENDER': 'inkpro@ahliki.com',
+    }
+
+    def setUp(self):
+        from main import graph_mail
+
+        graph_mail._token_cache.clear()
+        self.addCleanup(graph_mail._token_cache.clear)
+
+    def _run(self, *args, error_body=None):
+        import urllib.error
+        from io import StringIO
+
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+
+        out = StringIO()
+        body = io.BytesIO((error_body or '').encode('utf-8'))
+        failure = urllib.error.HTTPError(
+            'https://graph.microsoft.com/v1.0/users/x/sendMail', 400, 'Bad Request', {}, body
+        )
+        with override_settings(**self.graph_settings):
+            with mock.patch(
+                'main.graph_mail.TokenCache._fetch', return_value=('tok', 3600)
+            ), mock.patch('main.graph_mail._post_json', side_effect=failure), mock.patch(
+                'main.graph_mail.graph_get', side_effect=GraphError('Graph GET failed (403): denied')
+            ):
+                with self.assertRaises(CommandError):
+                    call_command('graphcheck', *args, stdout=out, stderr=out)
+        return out.getvalue()
+
+    def test_invalid_user_names_the_alias_and_licence_causes(self):
+        report = self._run(
+            '--to', 'customer@example.com',
+            error_body='{"error":{"code":"ErrorInvalidUser","message":'
+                       '"The requested user \'inkpro@ahliki.com\' is invalid."}}',
+        )
+        self.assertIn('cannot resolve inkpro@ahliki.com', report)
+        self.assertIn('alias', report)
+        self.assertIn('User Principal Name', report)
+        self.assertIn('licence', report)
+        self.assertIn('User.Read.All', report)
+
+    def test_access_denied_points_at_consent_and_access_policy(self):
+        report = self._run(
+            '--to', 'customer@example.com',
+            error_body='{"error":{"code":"ErrorAccessDenied","message":"Access is denied."}}',
+        )
+        self.assertIn('admin consent', report)
+        self.assertIn('ApplicationAccessPolicy', report)
+
+    def test_from_flag_overrides_the_configured_mailbox(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        with override_settings(**self.graph_settings):
+            with mock.patch('main.graph_mail.TokenCache._fetch', return_value=('tok', 3600)):
+                call_command('graphcheck', '--from', 'sales@inkprosamoa.com', stdout=out)
+        self.assertIn('Mailbox: sales@inkprosamoa.com', out.getvalue())
