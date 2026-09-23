@@ -68,6 +68,22 @@ def send_quote_to_customer_task(quote_id):
 
 
 @_task
+def send_quote_accepted_task(quote_id):
+    from .emails import send_quote_accepted
+    from .models import Quote
+
+    return send_quote_accepted(Quote.objects.get(pk=quote_id))
+
+
+@_task
+def notify_staff_quote_response_task(quote_id):
+    from .emails import notify_staff_quote_response
+    from .models import Quote
+
+    return notify_staff_quote_response(Quote.objects.get(pk=quote_id))
+
+
+@_task
 def build_quote_pdf_task(quote_id):
     from .models import Quote
     from .pdf import attach_pdf_to_quote

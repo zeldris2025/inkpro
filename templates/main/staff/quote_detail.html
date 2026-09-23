@@ -6,6 +6,7 @@
 <div class="mt-5 flex flex-wrap items-start justify-between gap-5">
   <div>
     <h1 class="font-display text-3xl">{{ quote.quote_number }}
+      {% if quote.revision %}<span class="ml-2 align-middle text-sm font-bold text-white/40">Revision {{ quote.revision }}</span>{% endif %}
       {% if quote.is_urgent %}<span class="ml-3 rounded-full bg-ink-magenta/25 px-3 py-1 align-middle text-xs font-bold uppercase tracking-widest text-ink-magenta">Rush job</span>{% endif %}
     </h1>
     <p class="mt-2 text-sm text-white/50">
@@ -15,6 +16,7 @@
       Submitted {{ quote.submitted_at|date:"j M Y, g:ia"|default:"—" }}
       {% if quote.reviewed_by %}· reviewed by {{ quote.reviewed_by.username }}{% endif %}
       {% if quote.sent_at %}· sent {{ quote.sent_at|date:"j M Y" }}{% endif %}
+      {% if quote.responded_at %}· {{ quote.get_status_display|lower }} {{ quote.responded_at|date:"j M Y, g:ia" }}{% endif %}
     </p>
   </div>
 
@@ -25,9 +27,19 @@
   </div>
 </div>
 
-{% if not quote.is_editable_by_staff %}
+{% if quote.status == 'ACCEPTED' %}
+<div class="mt-6 rounded-xl border border-green-400/30 bg-green-500/10 p-4 text-sm text-green-100">
+  <strong>Accepted by the customer</strong>{% if quote.responded_at %} on {{ quote.responded_at|date:"j M Y" }}{% endif %}, and they've been sent the final quote.
+  Need to change something? Edit below and save — the quote reopens as revision {{ quote.revision|add:1 }}, and once you send it the customer will need to accept the new version.
+</div>
+{% elif quote.status == 'DECLINED' %}
+<div class="mt-6 rounded-xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-100">
+  <strong>Declined by the customer</strong>{% if quote.responded_at %} on {{ quote.responded_at|date:"j M Y" }}{% endif %}.
+  Edit below and save to reopen it as revision {{ quote.revision|add:1 }}, then send the revised quote.
+</div>
+{% elif quote.edit_reopens %}
 <div class="mt-6 rounded-xl border border-white/15 bg-white/5 p-4 text-sm text-white/60">
-  This quote has been {{ quote.get_status_display|lower }} by the customer and can no longer be edited.
+  The customer already has this quote. Saving changes reopens it as revision {{ quote.revision|add:1 }} and pauses their link until you send it again.
 </div>
 {% endif %}
 
@@ -52,6 +64,12 @@
               <td class="py-2 pr-3">{{ item_form.description }}
                 {% if item_form.instance.added_by_staff %}<span class="mt-1 inline-block rounded bg-ink-cyan/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-sky-700">Staff added</span>{% endif %}
                 {% if item_form.instance.artwork %}<a href="{{ item_form.instance.artwork.url }}" target="_blank" class="mt-1 block text-xs font-bold text-sky-600 hover:underline">📎 Artwork</a>{% endif %}
+                {% if item_form.instance.customer_brief %}
+                <div class="mt-2 rounded border-l-2 border-ink-cyan bg-sky-50 px-2.5 py-1.5 text-xs text-zinc-700">
+                  <span class="block text-[10px] font-bold uppercase tracking-widest text-sky-700">What they want</span>
+                  {{ item_form.instance.customer_brief|linebreaksbr }}
+                </div>
+                {% endif %}
               </td>
               <td class="py-2 pr-3">{{ item_form.size }}</td>
               <td class="py-2 pr-3">{{ item_form.quantity }}</td>
@@ -76,7 +94,12 @@
         {% endfor %}
       </div>
 
+      {% if quote.edit_reopens %}
+      <button type="submit" name="save_quote" class="ink-btn mt-6"
+              onclick="return confirm('Save as revision {{ quote.revision|add:1 }}? The customer\u2019s link is paused until you send the revised quote.')">Save as revision {{ quote.revision|add:1 }}</button>
+      {% else %}
       <button type="submit" name="save_quote" class="ink-btn mt-6">Save changes</button>
+      {% endif %}
     </form>
 
     <!-- Staff-added line -->
@@ -117,12 +140,12 @@
         <input type="hidden" name="status" value="APPROVE_AND_SEND">
         <button type="submit" class="ink-btn w-full justify-center py-3.5 text-base"
                 {% if not quote.contact_email %}disabled title="No customer email on this quote"{% endif %}>
-          ✓ Approve &amp; send
+          {% if quote.revision %}✓ Send revised quote{% else %}✓ Approve &amp; send{% endif %}
         </button>
       </form>
       <p class="mt-3 text-xs leading-relaxed text-white/50">
         Generates the branded PDF, emails it to {{ quote.contact_email|default:"the customer" }} with one-click
-        accept/decline links, and moves the quote to Sent.
+        accept/decline links, and moves the quote to Sent.{% if quote.revision %} The email tells them this revision replaces the earlier one.{% endif %}
       </p>
       {% endif %}
 

@@ -1,0 +1,12 @@
+{% extends "main/email/base_email.html" %}
+{% block email_body %}
+<p style="margin:0 0 6px;padding:12px 14px;background:#f0fdf4;border-left:3px solid #16a34a;font-size:14px;color:#166534;">
+  <strong>Accepted</strong>{% if quote.responded_at %} on {{ quote.responded_at|date:"j F Y" }}{% endif %}. This is your final quote.
+</p>
+{% include "main/email/_quote_lines.html" %}
+
+<p style="margin:14px 0 0;text-align:center;font-size:13px;color:#71717a;">
+  <a href="{{ public_url }}" style="color:#18181b;font-weight:700;">View your quote online</a>
+</p>
+<p style="margin:18px 0 0;text-align:center;font-size:12px;color:#a1a1aa;">All amounts are in Samoan Tala (WST). Your final quote is attached as a PDF.</p>
+{% endblock %}

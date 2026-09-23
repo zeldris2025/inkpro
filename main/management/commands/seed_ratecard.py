@@ -197,6 +197,19 @@ EMAIL_TEMPLATES = [
         'Questions? Just reply to this email and we’ll sort it out.',
     ),
     (
+        EmailTemplate.QUOTE_ACCEPTED,
+        'Confirmed: your final InkPro quote {quote_number}',
+        'Thanks {name} — you’ve accepted quote {quote_number}. Your final quote is '
+        'attached for your records.',
+        'We’ll be in touch with timing. Questions? Just reply to this email.',
+    ),
+    (
+        EmailTemplate.STAFF_QUOTE_RESPONSE,
+        'Quote {quote_number} {decision} by {name}',
+        '{name} has {decision} quote {quote_number}.',
+        '',
+    ),
+    (
         EmailTemplate.STAFF_NEW_QUOTE,
         'New quote request: {quote_number}',
         'A new quote request came in from {name}.',

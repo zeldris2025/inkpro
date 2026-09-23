@@ -14,6 +14,11 @@
   </td></tr>
 </table>
 
+{% for item in quote.items.all %}{% if item.customer_brief %}
+<p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#a1a1aa;">What they want — {{ item.description }}</p>
+<p style="margin:0 0 20px;padding:12px 14px;background:#fafafa;border-left:3px solid #00AEEF;font-size:14px;color:#3f3f46;">{{ item.customer_brief|linebreaksbr }}</p>
+{% endif %}{% endfor %}
+
 {% if quote.customer_notes %}
 <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#a1a1aa;">Customer notes</p>
 <p style="margin:0 0 20px;padding:12px 14px;background:#fafafa;border-left:3px solid #FFD200;font-size:14px;color:#3f3f46;">{{ quote.customer_notes|linebreaksbr }}</p>

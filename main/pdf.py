@@ -107,10 +107,13 @@ def attach_pdf_to_quote(quote, request=None):
     Re-sending a quote replaces its document rather than adding another. Django
     storage appends a suffix instead of overwriting, so without clearing the
     old file first every send leaves an orphaned PDF behind in media/quotes.
+
+    Returns the rendered ``(filename, bytes, content_type)``, so a caller that
+    also emails the document does not render it twice.
     """
     from django.core.files.base import ContentFile
 
-    filename, content, _ = render_quote_pdf(quote, request=request)
+    filename, content, mimetype = render_quote_pdf(quote, request=request)
     if quote.pdf_file:
         quote.pdf_file.delete(save=False)
     storage = quote.pdf_file.storage
@@ -118,4 +121,4 @@ def attach_pdf_to_quote(quote, request=None):
     if storage.exists(target):
         storage.delete(target)
     quote.pdf_file.save(filename, ContentFile(content), save=True)
-    return quote.pdf_file
+    return filename, content, mimetype

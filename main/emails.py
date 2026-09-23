@@ -31,6 +31,17 @@ DEFAULT_COPY = {
         'intro': 'Hi {name}, your quote is ready to review.',
         'outro': 'Questions? Just reply to this email.',
     },
+    EmailTemplate.QUOTE_ACCEPTED: {
+        'subject': 'Confirmed: your final InkPro quote {quote_number}',
+        'intro': 'Thanks {name} — you’ve accepted quote {quote_number}. '
+                 'Your final quote is attached for your records.',
+        'outro': 'We’ll be in touch with timing. Questions? Just reply to this email.',
+    },
+    EmailTemplate.STAFF_QUOTE_RESPONSE: {
+        'subject': 'Quote {quote_number} {decision} by {name}',
+        'intro': '{name} has {decision} quote {quote_number}.',
+        'outro': '',
+    },
     EmailTemplate.STAFF_NEW_QUOTE: {
         'subject': 'New quote request: {quote_number}',
         'intro': 'A new quote request came in from {name}.',
@@ -145,6 +156,48 @@ def send_quote_to_customer(quote, request=None):
         name=quote.contact_name or 'there',
         quote_number=quote.quote_number,
     )
+
+
+def send_quote_accepted(quote):
+    """Confirm an acceptance to the customer with the final quote attached.
+
+    The PDF is rendered afresh, so it carries the Accepted stamp, and replaces
+    the stored copy so the "Download a copy" link serves the final version too.
+    """
+    from .pdf import attach_pdf_to_quote
+
+    filename, content, mimetype = attach_pdf_to_quote(quote)
+    return send_branded_email(
+        to=quote.contact_email,
+        key=EmailTemplate.QUOTE_ACCEPTED,
+        template='main/email/quote_accepted.html',
+        context={'quote': quote, 'items': quote.items.all(), 'public_url': quote.public_url()},
+        attachments=[(filename, content, mimetype)],
+        name=quote.contact_name or 'there',
+        quote_number=quote.quote_number,
+    )
+
+
+def notify_staff_quote_response(quote):
+    """Tell the team the customer accepted or declined, by email and Slack."""
+    accepted = quote.status == quote.ACCEPTED
+    decision = 'accepted' if accepted else 'declined'
+    staff_url = f"{settings.SITE_URL}{reverse('staff_quote_detail', args=[quote.pk])}"
+    sent = send_branded_email(
+        to=list(settings.STAFF_NOTIFY_EMAILS),
+        key=EmailTemplate.STAFF_QUOTE_RESPONSE,
+        template='main/email/staff_quote_response.html',
+        context={'quote': quote, 'accepted': accepted, 'staff_url': staff_url},
+        name=quote.contact_name or 'The customer',
+        quote_number=quote.quote_number,
+        decision=decision,
+    )
+    post_to_slack(
+        f'✅ Quote {quote.quote_number} accepted — ${quote.total:,.2f}\n{staff_url}'
+        if accepted
+        else f'Quote {quote.quote_number} was declined.\n{staff_url}'
+    )
+    return sent
 
 
 def send_payment_reminder(invoice):

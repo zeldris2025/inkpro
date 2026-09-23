@@ -69,6 +69,13 @@ def dashboard(request):
     )
 
 
+#: Kanban columns, left to right. Accepted and declined sit at the end so the
+#: team can see answers come in and reopen a quote for a revised send.
+BOARD_COLUMNS = [
+    Quote.SUBMITTED, Quote.IN_REVIEW, Quote.APPROVED, Quote.SENT, Quote.ACCEPTED, Quote.DECLINED,
+]
+
+
 @staff_required
 def quote_inbox(request):
     """Filterable list / kanban of everything in the pipeline."""
@@ -89,14 +96,16 @@ def quote_inbox(request):
         key: list(
             Quote.objects.filter(status=key).select_related('customer')[:25]
         )
-        for key in [Quote.SUBMITTED, Quote.IN_REVIEW, Quote.APPROVED, Quote.SENT]
+        for key in BOARD_COLUMNS
     }
     return render(
         request,
         'main/staff/quote_inbox.html',
         {
             'quotes': quotes[:200],
-            'board': board,
+            'board': [
+                (key, dict(Quote.STATUS_CHOICES)[key], board[key]) for key in BOARD_COLUMNS
+            ],
             'status': status,
             'search': search,
             'statuses': Quote.STATUS_CHOICES,
@@ -116,8 +125,9 @@ def quote_detail(request, pk):
 
     if request.method == 'POST' and 'save_quote' in request.POST:
         if not quote.is_editable_by_staff:
-            messages.error(request, 'This quote has been answered and can no longer be edited.')
+            messages.error(request, 'A draft quote belongs to the customer until they submit it.')
             return redirect('staff_quote_detail', pk=pk)
+        reopening = quote.edit_reopens
 
         form = StaffQuoteForm(request.POST, instance=quote)
         formset = StaffQuoteItemFormSet(request.POST, queryset=item_queryset)
@@ -130,9 +140,16 @@ def quote_detail(request, pk):
                 item.delete()
             quote.refresh_from_db()
             quote.recalculate()
-            if quote.status == Quote.SUBMITTED:
+            if quote.status == Quote.SUBMITTED or reopening:
                 quote.transition_to(Quote.IN_REVIEW, user=request.user)
-            messages.success(request, 'Quote updated.')
+            if reopening:
+                messages.success(
+                    request,
+                    f'Saved as revision {quote.revision}. The customer’s link is paused '
+                    'until you send the revised quote.',
+                )
+            else:
+                messages.success(request, 'Quote updated.')
             return redirect('staff_quote_detail', pk=pk)
         messages.error(request, 'Please fix the highlighted fields.')
 
@@ -168,7 +185,13 @@ def quote_add_item(request, pk):
         item.display_order = quote.items.count()
         item.save()
         quote.recalculate()
-        messages.success(request, 'Line added.')
+        if quote.edit_reopens:
+            quote.transition_to(Quote.IN_REVIEW, user=request.user)
+            messages.success(
+                request, f'Line added — saved as revision {quote.revision}. Send it when ready.'
+            )
+        else:
+            messages.success(request, 'Line added.')
     else:
         messages.error(request, 'Could not add that line.')
     return redirect('staff_quote_detail', pk=pk)
@@ -216,9 +239,10 @@ def _approve_and_send(request, quote):
         messages.warning(request, 'Quote sent, but the PDF could not be stored on the record.')
 
     run_task(send_quote_to_customer_task, quote.pk)
-    messages.success(
-        request, f'Quote {quote.quote_number} sent to {quote.contact_email}.'
-    )
+    label = f'Quote {quote.quote_number}'
+    if quote.revision:
+        label = f'Revision {quote.revision} of {quote.quote_number}'
+    messages.success(request, f'{label} sent to {quote.contact_email}.')
     return redirect('staff_quote_detail', pk=quote.pk)
 
 

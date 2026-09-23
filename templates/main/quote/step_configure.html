@@ -82,6 +82,13 @@
           </div>
 
           <div>
+            <label for="{{ form.customer_brief.id_for_label }}" class="mb-2 block text-xs font-bold uppercase tracking-widest text-white/50">{{ form.customer_brief.label }}</label>
+            {{ form.customer_brief }}
+            <p class="mt-1 text-xs text-white/40">In your own words — our team reads this before pricing your quote.</p>
+            {% for error in form.customer_brief.errors %}<p class="mt-1 text-xs font-semibold text-red-400">{{ error }}</p>{% endfor %}
+          </div>
+
+          <div>
             <label for="{{ form.artwork.id_for_label }}" class="mb-2 block text-xs font-bold uppercase tracking-widest text-white/50">{{ form.artwork.label }}</label>
             {{ form.artwork }}
             <p class="mt-1 text-xs text-white/40">PDF, AI, EPS, PNG or JPG. Don't have artwork yet? Skip it — we'll follow up.</p>

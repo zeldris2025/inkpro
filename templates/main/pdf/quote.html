@@ -24,6 +24,8 @@ table.items th { text-align: left; font-size: 7.5pt; letter-spacing: 1pt; text-t
 table.items td { padding: 9px 8px; border-bottom: 1px solid #ededf0; vertical-align: top; }
 .right { text-align: right; }
 .sub { font-size: 8pt; color: #a1a1aa; margin-top: 2px; }
+.brief { font-size: 8pt; color: #52525b; margin-top: 5px; padding-left: 7px; border-left: 2px solid #FFD200; }
+.stamp { display: inline-block; border: 1.5px solid #16a34a; color: #16a34a; font-size: 7.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5pt; padding: 3px 10px; border-radius: 4px; }
 table.totals { width: 48%; margin-left: 52%; margin-top: 14px; border-collapse: collapse; }
 table.totals td { padding: 4px 8px; font-size: 9.5pt; }
 table.totals tr.grand td { border-top: 2px solid #18181b; font-size: 13pt; font-weight: 900; padding-top: 9px; }
@@ -45,7 +47,8 @@ table.totals tr.grand td { border-top: 2px solid #18181b; font-size: 13pt; font-
 {% comment %}Centred under the mark so the whole letterhead reads as one
 block, before the document body returns to the left margin.{% endcomment %}
 <div class="doc-title">
-  <h1>Quote {{ quote.quote_number }}</h1>
+  <h1>Quote {{ quote.quote_number }}{% if quote.revision %} <span class="muted" style="font-size:10pt;font-weight:normal;">Revision {{ quote.revision }}</span>{% endif %}</h1>
+  {% if quote.status == 'ACCEPTED' %}<div style="margin:6px 0 4px;"><span class="stamp">✓ Accepted{% if quote.responded_at %} {{ quote.responded_at|date:"j F Y" }}{% endif %} · Final quote</span></div>{% endif %}
   <div class="muted" style="font-size:9pt;">
     Issued {{ quote.sent_at|default:quote.created_at|date:"j F Y" }}
     {% if quote.valid_until %} · valid until {{ quote.valid_until|date:"j F Y" }}{% endif %}
@@ -79,7 +82,8 @@ block, before the document body returns to the left margin.{% endcomment %}
   <tbody>
     {% for item in items %}
     <tr>
-      <td><strong>{{ item.description }}</strong>{% if item.pricing_rule.notes %}<div class="sub">{{ item.pricing_rule.notes }}</div>{% endif %}</td>
+      <td><strong>{{ item.description }}</strong>{% if item.pricing_rule.notes %}<div class="sub">{{ item.pricing_rule.notes }}</div>{% endif %}
+        {% if item.customer_brief %}<div class="brief">{{ item.customer_brief|linebreaksbr }}</div>{% endif %}</td>
       <td>{{ item.size|default:"—" }}</td>
       <td class="right">{{ item.quantity }}</td>
       <td class="right">${{ item.unit_price|floatformat:2|intcomma }}</td>

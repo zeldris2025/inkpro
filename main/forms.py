@@ -46,7 +46,7 @@ class QuoteItemForm(forms.ModelForm):
 
     class Meta:
         model = QuoteItem
-        fields = ['pricing_rule', 'quantity', 'width_m', 'height_m', 'artwork']
+        fields = ['pricing_rule', 'quantity', 'width_m', 'height_m', 'customer_brief', 'artwork']
         widgets = {
             # `:min` is bound by Alpine to the chosen rule's minimum. Without it
             # the field inherits min=0 from PositiveIntegerField and the browser
@@ -64,6 +64,14 @@ class QuoteItemForm(forms.ModelForm):
             'height_m': forms.NumberInput(
                 attrs={'step': '0.01', 'min': '0', 'placeholder': 'e.g. 1', 'x-model.number': 'height'}
             ),
+            'customer_brief': forms.Textarea(
+                attrs={
+                    'rows': 4,
+                    'maxlength': 2000,
+                    'placeholder': 'The wording you want printed, colours, fonts, where it will '
+                    'be displayed, any examples you like…',
+                }
+            ),
         }
 
     def __init__(self, *args, category=None, **kwargs):
@@ -77,6 +85,7 @@ class QuoteItemForm(forms.ModelForm):
         self.fields['pricing_rule'].label = 'Option'
         self.fields['width_m'].label = 'Width (metres)'
         self.fields['height_m'].label = 'Height (metres)'
+        self.fields['customer_brief'].label = 'Describe what you want (optional)'
         self.fields['artwork'].label = 'Artwork or reference image (optional)'
         self.fields['artwork'].required = False
         style(self.fields)

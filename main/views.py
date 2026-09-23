@@ -36,7 +36,9 @@ from .models import (
 from .permissions import CUSTOMER_GROUP
 from .tasks import (
     notify_staff_new_quote_task,
+    notify_staff_quote_response_task,
     run_task,
+    send_quote_accepted_task,
     send_quote_received_task,
 )
 
@@ -311,6 +313,14 @@ def public_quote_respond(request, token):
     if target is None:
         return HttpResponseBadRequest('Unknown decision.')
 
+    # Only a live, unanswered quote can be answered. transition_to() treats
+    # "move to the status you are already in" as legal, so without this a
+    # second click would re-send the confirmation and staff alert.
+    if not quote.awaiting_customer:
+        state = 'expired' if quote.is_expired else quote.get_status_display().lower()
+        messages.error(request, f'This quote is already {state}.')
+        return redirect('public_quote', token=token)
+
     try:
         quote.transition_to(target)
     except InvalidTransition:
@@ -322,14 +332,14 @@ def public_quote_respond(request, token):
     if target == Quote.DECLINED:
         quote.decline_reason = request.POST.get('reason', '')
         quote.save(update_fields=['decline_reason', 'updated_at'])
-        post_to_slack(f'Quote {quote.quote_number} was declined.')
     else:
         create_invoice_for_quote(quote)
-        post_to_slack(f'✅ Quote {quote.quote_number} accepted — ${quote.total:,.2f}')
+        run_task(send_quote_accepted_task, quote.pk)
+    run_task(notify_staff_quote_response_task, quote.pk)
 
     messages.success(
         request,
-        'Thanks — we’ll get started right away.'
+        'Thanks — we’ll get started right away. Your final quote is on its way to your inbox.'
         if target == Quote.ACCEPTED
         else 'Thanks for letting us know.',
     )
@@ -337,20 +347,43 @@ def public_quote_respond(request, token):
 
 
 def create_invoice_for_quote(quote):
-    """Open an unpaid register entry for an accepted quote (idempotent)."""
+    """Open an unpaid register entry for an accepted quote (idempotent).
+
+    A revised quote accepted again updates its existing entry rather than
+    opening a second one — but only while nothing has been paid against it.
+    Once money has come in, the figures are left for staff to reconcile by
+    hand, with a note saying the quote changed.
+    """
+    job = {
+        'job_details': '; '.join(quote.items.values_list('description', flat=True)),
+        'date': quote.responded_at.date() if quote.responded_at else None,
+        'qty': sum(quote.items.values_list('quantity', flat=True)) or 0,
+        'invoice_amount': quote.total,
+    }
     existing = Invoice.objects.filter(quote=quote).first()
     if existing:
+        if existing.invoice_amount == quote.total and not quote.revision:
+            return existing
+        if existing.amount_received:
+            note = (
+                f'Quote {quote.quote_number} revision {quote.revision} accepted at '
+                f'${quote.total:,.2f} after payment started — check this entry.'
+            )
+            if note not in existing.notes:
+                existing.notes = f'{existing.notes}\n{note}'.strip()
+                existing.save(update_fields=['notes'])
+            return existing
+        for field, value in job.items():
+            setattr(existing, field, value)
+        existing.save()
         return existing
     return Invoice.objects.create(
         quote=quote,
         customer=quote.customer,
         client_name='' if quote.customer else (quote.contact_name or ''),
-        job_details='; '.join(quote.items.values_list('description', flat=True)),
-        date=quote.responded_at.date() if quote.responded_at else None,
-        qty=sum(quote.items.values_list('quantity', flat=True)) or 0,
-        invoice_amount=quote.total,
         amount_received=0,
         notes=f'Auto-created from accepted quote {quote.quote_number}.',
+        **job,
     )
 
 

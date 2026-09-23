@@ -285,8 +285,8 @@ class Quote(models.Model):
     ]
 
     #: Which statuses a quote may legally move to. Enforced by
-    #: ``transition_to`` so the workflow cannot skip steps or resurrect a
-    #: finished quote.
+    #: ``transition_to`` so the workflow cannot skip steps. A quote the customer
+    #: has answered can only go back to review, which starts a new revision.
     ALLOWED_TRANSITIONS = {
         DRAFT: {SUBMITTED, EXPIRED},
         SUBMITTED: {IN_REVIEW, APPROVED, DECLINED, EXPIRED},
@@ -294,13 +294,16 @@ class Quote(models.Model):
         REVISED: {IN_REVIEW, APPROVED, DECLINED, EXPIRED},
         APPROVED: {SENT, IN_REVIEW, EXPIRED},
         SENT: {ACCEPTED, DECLINED, IN_REVIEW, EXPIRED},
-        ACCEPTED: set(),
+        ACCEPTED: {IN_REVIEW},
         DECLINED: {IN_REVIEW},
         EXPIRED: {IN_REVIEW},
     }
 
     #: Statuses the customer sees on the public token link.
     CUSTOMER_VISIBLE = {SENT, ACCEPTED, DECLINED, EXPIRED}
+    #: Statuses a customer has already seen. Reopening one of these for review
+    #: starts a new revision, so the next send is labelled as a revised quote.
+    ISSUED = {SENT, ACCEPTED, DECLINED, EXPIRED}
 
     quote_number = models.CharField(max_length=50, unique=True, blank=True, db_index=True)
     access_token = models.CharField(max_length=64, unique=True, default=_token, editable=False)
@@ -346,6 +349,9 @@ class Quote(models.Model):
     customer_notes = models.TextField(blank=True)
     staff_notes = models.TextField(blank=True, help_text='Internal only — never shown to customers.')
     decline_reason = models.TextField(blank=True)
+    revision = models.PositiveIntegerField(
+        default=0, help_text='Bumped each time an issued quote is reopened for changes.'
+    )
     pdf_file = models.FileField(upload_to='quotes/', blank=True, null=True)
 
     objects = QuoteQuerySet.as_manager()
@@ -449,6 +455,9 @@ class Quote(models.Model):
             )
         now = timezone.now()
         fields = ['status', 'updated_at']
+        if new_status == self.IN_REVIEW and self.status in self.ISSUED:
+            self.revision += 1
+            fields.append('revision')
         self.status = new_status
 
         if new_status == self.SUBMITTED and not self.submitted_at:
@@ -463,11 +472,17 @@ class Quote(models.Model):
         if new_status == self.SENT:
             self.sent_at = now
             fields.append('sent_at')
-            if not self.valid_until:
+            # A resent revision gets a fresh window unless staff set a later date.
+            if not self.valid_until or self.valid_until < now.date():
                 self.valid_until = (
                     now + timedelta(days=settings.QUOTE_VALID_DAYS)
                 ).date()
                 fields.append('valid_until')
+            # The previous answer belonged to the previous revision.
+            if self.responded_at or self.decline_reason:
+                self.responded_at = None
+                self.decline_reason = ''
+                fields += ['responded_at', 'decline_reason']
         if new_status in (self.ACCEPTED, self.DECLINED):
             self.responded_at = now
             fields.append('responded_at')
@@ -486,7 +501,12 @@ class Quote(models.Model):
 
     @property
     def is_editable_by_staff(self):
-        return self.status not in (self.ACCEPTED, self.DECLINED)
+        return self.status != self.DRAFT
+
+    @property
+    def edit_reopens(self):
+        """Saving changes sends the quote back to review as a new revision."""
+        return self.status in self.ISSUED
 
     def public_url(self):
         return f"{settings.SITE_URL}{reverse('public_quote', args=[self.access_token])}"
@@ -510,6 +530,9 @@ class QuoteItem(models.Model):
     unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     line_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     artwork = models.FileField(upload_to='artwork/%Y/%m/', blank=True, null=True)
+    customer_brief = models.TextField(
+        blank=True, help_text='What the customer wants, in their own words.'
+    )
     is_urgent = models.BooleanField(default=False)
     added_by_staff = models.BooleanField(default=False)
     display_order = models.IntegerField(default=0)
@@ -641,12 +664,16 @@ class EmailTemplate(models.Model):
 
     QUOTE_RECEIVED = 'QUOTE_RECEIVED'
     QUOTE_SENT = 'QUOTE_SENT'
+    QUOTE_ACCEPTED = 'QUOTE_ACCEPTED'
     STAFF_NEW_QUOTE = 'STAFF_NEW_QUOTE'
+    STAFF_QUOTE_RESPONSE = 'STAFF_QUOTE_RESPONSE'
     PAYMENT_REMINDER = 'PAYMENT_REMINDER'
     KEY_CHOICES = [
         (QUOTE_RECEIVED, 'Customer — quote request received'),
         (QUOTE_SENT, 'Customer — your quote is ready'),
+        (QUOTE_ACCEPTED, 'Customer — final quote after accepting'),
         (STAFF_NEW_QUOTE, 'Staff — new quote request'),
+        (STAFF_QUOTE_RESPONSE, 'Staff — customer accepted or declined'),
         (PAYMENT_REMINDER, 'Customer — payment reminder'),
     ]
 

@@ -416,6 +416,197 @@ class QuoteWizardFlowTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
+@override_settings(STAFF_NOTIFY_EMAILS=['inkpro@ahliki.com'])
+class QuoteResponseAndRevisionTests(TestCase):
+    """Customer answers a sent quote; staff are told, and can revise and resend."""
+
+    def setUp(self):
+        self.category = ServiceCategory.objects.create(name='Banners', slug='banners')
+        self.rule = PricingRule.objects.create(
+            category=self.category, name='2m x 1m', base_price=Decimal('280')
+        )
+        self.staff = User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
+        self.quote = Quote.objects.create(
+            guest_name='Ada', guest_email='ada@example.com', status=Quote.SUBMITTED
+        )
+        self.item = QuoteItem.objects.create(
+            quote=self.quote, category=self.category, pricing_rule=self.rule,
+            description='Banner', quantity=1, unit_price=Decimal('280'),
+            customer_brief='Blue background, white text: GRAND OPENING',
+        )
+        self.quote.recalculate()
+        self.quote.transition_to(Quote.APPROVED, user=self.staff)
+        self.quote.transition_to(Quote.SENT, user=self.staff)
+
+    def respond(self, decision, **extra):
+        return self.client.post(
+            reverse('public_quote_respond', args=[self.quote.access_token]),
+            {'decision': decision, **extra},
+        )
+
+    def edit_as_staff(self, unit_price):
+        self.client.force_login(self.staff)
+        return self.client.post(
+            reverse('staff_quote_detail', args=[self.quote.pk]),
+            {
+                'save_quote': '1',
+                'form-TOTAL_FORMS': '1', 'form-INITIAL_FORMS': '1',
+                'form-MIN_NUM_FORMS': '0', 'form-MAX_NUM_FORMS': '1000',
+                'form-0-id': self.item.pk, 'form-0-description': 'Banner',
+                'form-0-size': '', 'form-0-quantity': '1', 'form-0-unit_price': unit_price,
+                'urgent_fee': '0', 'discount': '0', 'total_override': '',
+                'valid_until': '', 'staff_notes': '',
+            },
+        )
+
+    def test_accepting_alerts_the_office_and_sends_the_customer_the_final_quote(self):
+        self.respond('accept')
+        by_recipient = {tuple(m.to): m for m in mail.outbox}
+        self.assertEqual(len(mail.outbox), 2)
+
+        staff = by_recipient[('inkpro@ahliki.com',)]
+        self.assertIn('accepted', staff.subject)
+        self.assertIn(self.quote.quote_number, staff.subject)
+
+        customer = by_recipient[('ada@example.com',)]
+        self.assertIn('final', customer.subject.lower())
+        filename, content, _ = customer.attachments[0]
+        self.assertIn(self.quote.quote_number, filename)
+        self.quote.refresh_from_db()
+        self.assertTrue(self.quote.pdf_file)  # "Download a copy" serves the final version
+
+    def test_the_final_document_is_stamped_accepted(self):
+        from main.pdf import render_quote_html
+
+        self.respond('accept')
+        self.quote.refresh_from_db()
+        self.assertIn('Final quote', render_quote_html(self.quote))
+
+    def test_declining_alerts_the_office_with_the_reason(self):
+        self.respond('decline', reason='Too pricey for us right now')
+        self.assertEqual(len(mail.outbox), 1)
+        staff = mail.outbox[0]
+        self.assertEqual(staff.to, ['inkpro@ahliki.com'])
+        self.assertIn('declined', staff.subject)
+        self.assertIn('Too pricey', staff.alternatives[0][0])
+
+    def test_a_second_click_does_not_resend_anything(self):
+        self.respond('accept')
+        mail.outbox.clear()
+        self.respond('accept')
+        self.respond('decline')
+        self.assertEqual(mail.outbox, [])
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.status, Quote.ACCEPTED)
+
+    def test_an_expired_quote_cannot_be_accepted(self):
+        Quote.objects.filter(pk=self.quote.pk).update(
+            valid_until=timezone.localdate() - timezone.timedelta(days=1)
+        )
+        self.respond('accept')
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.status, Quote.SENT)
+        self.assertFalse(Invoice.objects.exists())
+
+    def test_answered_quotes_show_on_the_staff_board(self):
+        self.respond('accept')
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('staff_quote_inbox'))
+        columns = {key: quotes for key, _, quotes in response.context['board']}
+        self.assertIn(self.quote, columns[Quote.ACCEPTED])
+        self.assertIn(Quote.DECLINED, columns)
+
+    def test_staff_can_revise_an_accepted_quote_and_resend_it(self):
+        self.respond('accept')
+        self.edit_as_staff('300.00')
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.status, Quote.IN_REVIEW)
+        self.assertEqual(self.quote.revision, 1)
+        # Paused: the customer cannot accept a revision that has not been sent.
+        public = self.client.get(reverse('public_quote', args=[self.quote.access_token]))
+        self.assertEqual(public.status_code, 403)
+
+        mail.outbox.clear()
+        self.client.post(
+            reverse('staff_quote_transition', args=[self.quote.pk]), {'status': 'APPROVE_AND_SEND'}
+        )
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.status, Quote.SENT)
+        self.assertIsNone(self.quote.responded_at)
+        self.assertIn('revised quote', mail.outbox[0].alternatives[0][0])
+
+        # Accepting the revision updates the unpaid register entry in place.
+        self.client.logout()
+        self.respond('accept')
+        invoice = Invoice.objects.get(quote=self.quote)
+        self.quote.refresh_from_db()
+        self.assertEqual(invoice.invoice_amount, self.quote.total)
+        self.assertEqual(self.quote.total, Decimal('345.00'))
+
+    def test_a_part_paid_entry_is_flagged_not_rewritten(self):
+        self.respond('accept')
+        invoice = Invoice.objects.get(quote=self.quote)
+        invoice.amount_received = Decimal('100')
+        invoice.save()
+        original = invoice.invoice_amount
+
+        self.edit_as_staff('300.00')
+        self.client.post(
+            reverse('staff_quote_transition', args=[self.quote.pk]), {'status': 'APPROVE_AND_SEND'}
+        )
+        self.client.logout()
+        self.respond('accept')
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.invoice_amount, original)
+        self.assertIn('check this entry', invoice.notes)
+
+    def test_staff_can_revise_a_declined_quote(self):
+        self.respond('decline', reason='Too dear')
+        self.edit_as_staff('250.00')
+        self.client.post(
+            reverse('staff_quote_transition', args=[self.quote.pk]), {'status': 'APPROVE_AND_SEND'}
+        )
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.status, Quote.SENT)
+        self.assertEqual(self.quote.revision, 1)
+        self.assertEqual(self.quote.decline_reason, '')
+
+    def test_the_customer_brief_reaches_staff_and_the_documents(self):
+        from main.pdf import render_quote_html
+
+        self.client.force_login(self.staff)
+        detail = self.client.get(reverse('staff_quote_detail', args=[self.quote.pk]))
+        self.assertContains(detail, 'GRAND OPENING')
+        self.assertIn('GRAND OPENING', render_quote_html(self.quote))
+
+
+class CustomerBriefTests(TestCase):
+    def setUp(self):
+        category = ServiceCategory.objects.create(name='Banners', slug='banners')
+        self.rule = PricingRule.objects.create(
+            category=category, name='2m x 1m', base_price=Decimal('280')
+        )
+
+    @override_settings(STAFF_NOTIFY_EMAILS=['inkpro@ahliki.com'])
+    def test_the_brief_is_saved_and_emailed_to_the_office(self):
+        page = self.client.get(reverse('quote_configure', args=['banners']))
+        self.assertContains(page, 'Describe what you want')
+
+        self.client.post(
+            reverse('quote_configure', args=['banners']),
+            {'pricing_rule': self.rule.pk, 'quantity': 1,
+             'customer_brief': 'Logo on the left, phone number big'},
+        )
+        self.assertEqual(QuoteItem.objects.get().customer_brief, 'Logo on the left, phone number big')
+
+        self.client.post(
+            reverse('quote_review'),
+            {'guest_name': 'Ada', 'guest_email': 'ada@example.com', 'guest_phone': '1'},
+        )
+        staff = next(m for m in mail.outbox if m.to == ['inkpro@ahliki.com'])
+        self.assertIn('phone number big', staff.alternatives[0][0])
+
+
 class AccessControlTests(TestCase):
     def setUp(self):
         self.customer_user = User.objects.create_user('cust', 'c@example.com', 'pw')

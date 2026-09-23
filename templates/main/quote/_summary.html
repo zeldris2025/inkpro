@@ -15,6 +15,7 @@ figures always come from Quote.recalculate() rather than being recomputed in JS.
         <div class="text-xs text-white/45">
           {% if item.size %}{{ item.size }} · {% endif %}Qty {{ item.quantity }} @ ${{ item.unit_price|floatformat:2|intcomma }}
         </div>
+        {% if item.customer_brief %}<div class="mt-1 text-xs italic text-white/40">“{{ item.customer_brief|truncatechars:70 }}”</div>{% endif %}
       </div>
       <div class="flex items-center gap-2">
         <span class="font-bold tabular">${{ item.line_total|floatformat:2|intcomma }}</span>
