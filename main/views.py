@@ -523,10 +523,10 @@ class BrandedPasswordResetView(auth_views.PasswordResetView):
 
     @property
     def extra_email_context(self):
-        from .context_processors import absolute_logo_url
+        from .context_processors import LOGO_ON_DARK, absolute_logo_url
 
         return {
-            'LOGO_URL': absolute_logo_url(),
+            'LOGO_URL': absolute_logo_url(LOGO_ON_DARK),  # black email header
             'SITE_URL': settings.SITE_URL,
             'TAGLINE': 'Think Ink, Think Pro',
         }

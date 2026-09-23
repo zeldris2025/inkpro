@@ -4,6 +4,7 @@ pricing arithmetic, quote status transitions and invoice balance derivation.
 
 import base64
 import io
+import json
 import pathlib
 import re
 from decimal import Decimal
@@ -305,6 +306,33 @@ class QuoteWizardFlowTests(TestCase):
         self.assertRedirects(submit, reverse('quote_submitted', args=[quote.access_token]))
         # Customer acknowledgement and the staff alert both go out.
         self.assertEqual(len(mail.outbox), 2)
+
+    @override_settings(
+        SITE_URL='https://inkprosamoa.com', STAFF_NOTIFY_EMAILS=['inkpro@ahliki.com']
+    )
+    def test_submission_alerts_the_office_with_live_links(self):
+        self.client.post(
+            reverse('quote_configure', args=['banners']),
+            {'pricing_rule': self.rule.pk, 'quantity': 1},
+        )
+        self.client.post(
+            reverse('quote_review'),
+            {'guest_name': 'Ada', 'guest_email': 'ada@example.com', 'guest_phone': '021 555 0000'},
+        )
+        quote = Quote.objects.get()
+        staff = next(m for m in mail.outbox if m.to == ['inkpro@ahliki.com'])
+        self.assertIn(quote.quote_number, staff.subject)
+        for message in mail.outbox:
+            html = message.alternatives[0][0]
+            self.assertNotIn('localhost', html)
+            # The header is black, so the logo must be the on-dark variant.
+            self.assertIn(
+                'src="https://inkprosamoa.com/static/img/inkpro-logo-on-dark.png"', html
+            )
+        self.assertIn(
+            f'https://inkprosamoa.com{reverse("staff_quote_detail", args=[quote.pk])}',
+            staff.alternatives[0][0],
+        )
 
     def test_minimum_quantity_is_enforced(self):
         self.rule.min_qty = 10
@@ -1401,6 +1429,36 @@ class QuoteDocumentTests(TestCase):
         if mimetype == 'application/pdf':
             self.assertTrue(content.startswith(b'%PDF'))
 
+    def test_issued_date_is_shown(self):
+        # Chaining |date twice used to format the date and then blank it.
+        self.quote.sent_at = timezone.now()
+        self.quote.save()
+        issued = timezone.localtime(self.quote.sent_at).strftime('%B %Y')
+        self.assertRegex(self.html(), rf'Issued \d{{1,2}} {issued}')
+
+    @override_settings(DEFAULT_FROM_EMAIL='InkPro <inkpro@ahliki.com>')
+    def test_from_address_is_the_real_mailbox(self):
+        markup = self.html()
+        self.assertIn('inkpro@ahliki.com', markup)
+        self.assertNotIn('inkpro@inkpro.com', markup)
+
+    @override_settings(SITE_URL='http://127.0.0.1:9')  # nothing listens here
+    def test_logo_is_embedded_without_fetching_over_http(self):
+        from main.pdf import render_quote_pdf, weasyprint_available
+
+        if not weasyprint_available():
+            self.skipTest('WeasyPrint is not installed on this host.')
+        _, content, mimetype = render_quote_pdf(self.quote)
+        self.assertEqual(mimetype, 'application/pdf')
+        self.assertIn(b'/Subtype /Image', content)
+
+    def test_staff_preview_streams_the_pdf_inline(self):
+        staff = User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
+        self.client.force_login(staff)
+        response = self.client.get(reverse('staff_quote_pdf', args=[self.quote.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response['Content-Disposition'].startswith('inline;'))
+
 
 class FreshCheckoutTests(TestCase):
     """A clone carries no database or media, so the build inputs must be committed.
@@ -2118,7 +2176,13 @@ class GraphCheckDiagnosticsTests(TestCase):
             with mock.patch(
                 'main.graph_mail.TokenCache._fetch', return_value=('tok', 3600)
             ), mock.patch('main.graph_mail._post_json', side_effect=failure), mock.patch(
-                'main.graph_mail.graph_get', side_effect=GraphError('Graph GET failed (403): denied')
+                # Patched where graphcheck imported them, not where they are
+                # defined, and so that no test ever touches the network.
+                'main.management.commands.graphcheck.graph_get',
+                side_effect=GraphError('Graph GET users/x failed (403): denied'),
+            ), mock.patch(
+                'main.management.commands.graphcheck.tenant_for_domain',
+                return_value='tenant-1',
             ):
                 with self.assertRaises(CommandError):
                     call_command('graphcheck', *args, stdout=out, stderr=out)
@@ -2154,3 +2218,79 @@ class GraphCheckDiagnosticsTests(TestCase):
             with mock.patch('main.graph_mail.TokenCache._fetch', return_value=('tok', 3600)):
                 call_command('graphcheck', '--from', 'sales@inkprosamoa.com', stdout=out)
         self.assertIn('Mailbox: sales@inkprosamoa.com', out.getvalue())
+
+
+class TenantOwnershipTests(TestCase):
+    """A token from the wrong tenant is the failure a valid token hides."""
+
+    def setUp(self):
+        from main import graph_mail
+
+        graph_mail._token_cache.clear()
+        self.addCleanup(graph_mail._token_cache.clear)
+
+    def test_tenant_for_domain_reads_the_guid_out_of_the_issuer(self):
+        from main.graph_mail import tenant_for_domain
+
+        discovery = json.dumps(
+            {'issuer': 'https://login.microsoftonline.com/92e8fb36-aaaa/v2.0'}
+        ).encode()
+        with mock.patch('main.graph_mail.urllib.request.urlopen') as opened:
+            opened.return_value.__enter__.return_value.read.return_value = discovery
+            self.assertEqual(tenant_for_domain('ahliki.com'), '92e8fb36-aaaa')
+
+    def test_tenant_for_domain_is_quiet_when_it_cannot_tell(self):
+        from main.graph_mail import tenant_for_domain
+
+        self.assertIsNone(tenant_for_domain(''))
+        with mock.patch(
+            'main.graph_mail.urllib.request.urlopen', side_effect=OSError('offline')
+        ):
+            self.assertIsNone(tenant_for_domain('ahliki.com'))
+
+    def test_graphcheck_reports_a_mailbox_in_another_tenant(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        with override_settings(
+            MS_GRAPH_TENANT_ID='563f249d-config',
+            MS_GRAPH_CLIENT_ID='client-1',
+            MS_GRAPH_CLIENT_SECRET='secret-1',
+            MS_GRAPH_SENDER='inkpro@ahliki.com',
+        ):
+            with mock.patch(
+                'main.graph_mail.TokenCache._fetch', return_value=('tok', 3600)
+            ), mock.patch(
+                'main.management.commands.graphcheck.tenant_for_domain',
+                return_value='92e8fb36-other',
+            ):
+                call_command('graphcheck', stdout=out)
+
+        report = out.getvalue()
+        self.assertIn('ahliki.com belongs to tenant 92e8fb36-other', report)
+        self.assertIn('563f249d-config', report)
+        self.assertIn('switch directory', report)
+
+    def test_graphcheck_passes_when_the_tenant_owns_the_domain(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        with override_settings(
+            MS_GRAPH_TENANT_ID='92e8fb36-other',
+            MS_GRAPH_CLIENT_ID='client-1',
+            MS_GRAPH_CLIENT_SECRET='secret-1',
+            MS_GRAPH_SENDER='inkpro@ahliki.com',
+        ):
+            with mock.patch(
+                'main.graph_mail.TokenCache._fetch', return_value=('tok', 3600)
+            ), mock.patch(
+                'main.management.commands.graphcheck.tenant_for_domain',
+                return_value='92E8FB36-OTHER',  # case must not matter
+            ):
+                call_command('graphcheck', stdout=out)
+
+        self.assertIn('ahliki.com belongs to this tenant', out.getvalue())

@@ -66,7 +66,7 @@ def send_branded_email(*, to, key, template, context, attachments=None, **copy_c
         logger.warning('Skipping %s email: no recipient address.', key)
         return False
 
-    from .context_processors import absolute_logo_url
+    from .context_processors import LOGO_ON_DARK, absolute_logo_url
 
     copy = _copy(key, **copy_context)
     html = render_to_string(
@@ -76,7 +76,8 @@ def send_branded_email(*, to, key, template, context, attachments=None, **copy_c
             'copy': copy,
             'SITE_URL': settings.SITE_URL,
             # Mail clients need an absolute URL; a relative one silently breaks.
-            'LOGO_URL': absolute_logo_url(),  # original colours: email is white
+            # The email header is black, so it needs the on-dark variant.
+            'LOGO_URL': absolute_logo_url(LOGO_ON_DARK),
         },
     )
     message = EmailMultiAlternatives(

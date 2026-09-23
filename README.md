@@ -436,6 +436,14 @@ python manage.py graphcheck                       # credentials and token only
 python manage.py graphcheck --to you@example.com  # also sends a test message
 ```
 
+`graphcheck` also checks something a valid token cannot tell you: that the
+tenant the application is registered in is the same tenant that owns the
+sending mailbox's domain. Azure subscriptions and Microsoft 365 frequently sit
+in *different* directories, and an app registered in the wrong one gets a
+perfectly good token whose every send fails with Graph calling a real address
+invalid. The ownership is public information, so the check runs before any
+credential is involved.
+
 `deploycheck` also fails if the Graph backend is selected with any credential
 left blank. Attachments go inline, which Graph caps at roughly 3 MB — well
 above a quote PDF; anything larger is dropped with an error in the log rather

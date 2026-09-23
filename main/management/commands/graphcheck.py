@@ -11,7 +11,13 @@ fails loudly here rather than silently swallowing a customer's quote:
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from main.graph_mail import GraphEmailBackend, GraphError, address_only, graph_get
+from main.graph_mail import (
+    GraphEmailBackend,
+    GraphError,
+    address_only,
+    graph_get,
+    tenant_for_domain,
+)
 
 BACKEND_PATH = 'main.graph_mail.GraphEmailBackend'
 
@@ -54,6 +60,8 @@ class Command(BaseCommand):
         except GraphError as exc:
             raise CommandError(str(exc)) from exc
         self.stdout.write(self.style.SUCCESS('  PASS  Acquired an app-only access token.'))
+
+        self.check_tenant_owns_mailbox(backend, mailbox)
 
         if settings.EMAIL_BACKEND != BACKEND_PATH:
             self.stdout.write(
@@ -99,6 +107,41 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
         self.stdout.write(self.style.SUCCESS(f'  PASS  Test message sent to {recipient}.'))
 
+    def check_tenant_owns_mailbox(self, backend, mailbox):
+        """Warn when the app and the mailbox live in different tenants.
+
+        An app-only token is issued by one tenant and is valid only for that
+        tenant's mailboxes. Register the app in the Azure subscription's
+        directory while the email is in the Microsoft 365 directory — a common
+        split, and the portal offers no hint of it — and every send fails with
+        Graph calling a perfectly real address invalid.
+        """
+        domain = mailbox.rpartition('@')[2]
+        owner = tenant_for_domain(domain, timeout=backend.timeout)
+        if owner is None:
+            self.stdout.write(
+                f'  ....  Could not look up which tenant owns {domain} (offline, or the '
+                'domain is not on Microsoft 365).'
+            )
+            return False
+        if owner.lower() == (backend.tenant_id or '').lower():
+            self.stdout.write(self.style.SUCCESS(f'  PASS  {domain} belongs to this tenant.'))
+            return True
+        self.stdout.write(
+            self.style.ERROR(
+                f'  FAIL  {domain} belongs to tenant {owner}, but MS_GRAPH_TENANT_ID is '
+                f'{backend.tenant_id}.'
+            )
+        )
+        self.stdout.write(
+            '        A token from one tenant cannot send as a mailbox in another, which is '
+            'why Graph calls the address invalid. Either register the application in '
+            f'{owner} — in the Azure portal, switch directory first, top right — and use '
+            'that tenant ID, or make the existing registration multi-tenant and have an '
+            f'administrator of {owner} grant it consent.'
+        )
+        return False
+
     # -- diagnosis ----------------------------------------------------------
     def explain(self, error, mailbox, backend):
         """Turn Graph's terse refusal into the thing to go and check.
@@ -111,8 +154,9 @@ class Command(BaseCommand):
         hints = []
         if 'ErrorInvalidUser' in error or 'ResourceNotFound' in error or 'Invalid user' in error:
             hints = [
-                f'Graph cannot resolve {mailbox} to a mailbox in this tenant. In order of'
-                ' likelihood:',
+                f'Graph cannot resolve {mailbox} to a mailbox in tenant'
+                f' {backend.tenant_id}. Checked above: whether that tenant owns the'
+                ' domain at all. If it does, then in order of likelihood:',
                 '  1. It is an alias, not the account\'s primary address. Graph resolves'
                 ' /users/ by User Principal Name or object ID only — a secondary proxy'
                 ' address fails exactly like this. Microsoft 365 admin centre > Users >'
@@ -121,8 +165,8 @@ class Command(BaseCommand):
                 ' An unlicensed user object is "invalid" to sendMail.',
                 '  3. It is a distribution list or a Microsoft 365 Group. Neither can'
                 ' send; a shared mailbox can.',
-                f'  4. The domain of {mailbox} belongs to a different tenant than'
-                f' MS_GRAPH_TENANT_ID ({backend.tenant_id}).',
+                '  4. The mailbox is hosted in a different Microsoft 365 tenant than the'
+                ' one the application is registered in.',
             ]
         elif 'MailboxNotEnabledForRESTAPI' in error:
             hints = [

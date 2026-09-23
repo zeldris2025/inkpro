@@ -3,7 +3,7 @@
 <style>
 /* Standalone stylesheet: WeasyPrint renders this document with no access to
    the site's CSS, and the same file doubles as the HTML fallback attachment. */
-@page { size: A4; margin: 16mm 14mm 20mm; @bottom-center { content: "InkPro · Think Ink, Think Pro · Page " counter(page) " of " counter(pages); font-size: 8pt; color: #a1a1aa; } }
+@page { size: A4; margin: 16mm 14mm 20mm; @bottom-center { content: "InkPro · Think Ink, Think Pro · Page " counter(page) " of " counter(pages); font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #a1a1aa; } }
 * { box-sizing: border-box; }
 body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #18181b; margin: 0; line-height: 1.5; }
 /* Plain white letterhead: the mark centred, nothing behind it. The artwork
@@ -47,7 +47,7 @@ block, before the document body returns to the left margin.{% endcomment %}
 <div class="doc-title">
   <h1>Quote {{ quote.quote_number }}</h1>
   <div class="muted" style="font-size:9pt;">
-    Issued {{ quote.sent_at|date:"j F Y"|default:quote.created_at|date:"j F Y" }}
+    Issued {{ quote.sent_at|default:quote.created_at|date:"j F Y" }}
     {% if quote.valid_until %} · valid until {{ quote.valid_until|date:"j F Y" }}{% endif %}
     {% if quote.is_urgent %} · <span class="badge">Rush job</span>{% endif %}
   </div>
@@ -65,7 +65,7 @@ block, before the document body returns to the left margin.{% endcomment %}
     <td>
       <div class="label">From</div>
       <strong>InkPro</strong><br>
-      inkpro@inkpro.com<br>
+      {{ CONTACT_EMAIL }}<br>
       {{ SITE_URL|default:"inkpro.example" }}
     </td>
   </tr>

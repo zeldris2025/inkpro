@@ -73,6 +73,30 @@ def _post_json(url, payload, token, timeout):
     return json.loads(body) if body else None
 
 
+def tenant_for_domain(domain, timeout=10):
+    """The tenant GUID that owns *domain*, or None if that cannot be told.
+
+    Microsoft publishes this mapping unauthenticated, at each tenant's OpenID
+    discovery document, so it can be checked before any credential is involved.
+    It answers the question a token cannot: an app registered in tenant A holds
+    a perfectly valid token that is useless for a mailbox in tenant B, and the
+    only symptom is Graph calling the address invalid.
+    """
+    if not domain:
+        return None
+    url = f'{LOGIN_HOST}/{urllib.parse.quote(domain)}/v2.0/.well-known/openid-configuration'
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            issuer = json.loads(response.read()).get('issuer', '')
+    except (OSError, ValueError):
+        # Offline, or the domain belongs to no tenant at all. Either way this
+        # is a diagnostic nicety; never let it break a send.
+        return None
+    # issuer looks like https://login.microsoftonline.com/<guid>/v2.0
+    parts = [part for part in issuer.split('/') if part]
+    return parts[-2] if len(parts) >= 2 else None
+
+
 def graph_get(path, token, timeout=20):
     """GET a Graph resource. Returns the decoded body.
 
