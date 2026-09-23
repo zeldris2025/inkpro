@@ -16,6 +16,7 @@ Run it against the production environment:
     DEBUG=False SECRET_KEY=... DATABASE_URL=... python manage.py deploycheck
 """
 
+import os
 from pathlib import Path
 
 from django.conf import settings
@@ -121,7 +122,12 @@ class Command(BaseCommand):
             self.warnings.append('Database connection is not requiring TLS.')
 
     def check_media(self):
-        from inkpro.media import AZURE_MEDIA_ROOT, inside_deploy_tree
+        from inkpro.media import (
+            AZURE_MEDIA_ROOT,
+            inside_deploy_tree,
+            is_persistent,
+            on_azure_app_service,
+        )
 
         root = Path(settings.MEDIA_ROOT)
         if inside_deploy_tree(root):
@@ -130,6 +136,17 @@ class Command(BaseCommand):
             self.failures.append(
                 f'MEDIA_ROOT is inside the deployed tree ({root}) — the next deployment '
                 f'will delete every uploaded image. Set MEDIA_ROOT={AZURE_MEDIA_ROOT}.'
+            )
+            return
+        if on_azure_app_service(os.environ) and not is_persistent(root):
+            # Anything outside /home is container-local scratch: writable, and
+            # emptied whenever App Service recycles the container, which it
+            # does on its own schedule. Uploads then vanish hours after they
+            # were made, with no deployment to blame.
+            self.failures.append(
+                f'MEDIA_ROOT is not on persistent storage ({root}) — only /home survives '
+                f'a container restart, so uploads will disappear on the next recycle. '
+                f'Set MEDIA_ROOT={AZURE_MEDIA_ROOT}.'
             )
             return
         if not root.exists():

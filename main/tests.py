@@ -1998,13 +1998,39 @@ class MediaRootResolutionTests(TestCase):
         self.assertEqual(resolved, AZURE_MEDIA_ROOT)
         self.assertEqual(str(resolved), '/home/site/media')
 
-    def test_azure_container_outside_wwwroot_keeps_its_own_layout(self):
-        """The Docker image serves from /app, which no deployment replaces."""
-        from inkpro.media import resolve_media_root
+    def test_azure_container_path_is_not_treated_as_persistent(self):
+        """A container image serves from /app, which the next restart discards."""
+        from inkpro.media import AZURE_MEDIA_ROOT, resolve_media_root
 
         self.assertEqual(
             resolve_media_root('/app', '', environ={'WEBSITE_SITE_NAME': 'inkpro'}),
-            pathlib.Path('/app/media'),
+            AZURE_MEDIA_ROOT,
+        )
+
+    def test_oryx_tmp_extraction_is_not_treated_as_persistent(self):
+        """An Oryx build runs the app from /tmp/8d…, emptied on every recycle.
+
+        This is the path that loses uploads hours after they were made: no
+        deployment is involved, only App Service recycling the container.
+        """
+        from inkpro.media import AZURE_MEDIA_ROOT, resolve_media_root
+
+        self.assertEqual(
+            resolve_media_root(
+                '/tmp/8ddf1a2b3c4d5e6', '', environ={'WEBSITE_SITE_NAME': 'inkpro'}
+            ),
+            AZURE_MEDIA_ROOT,
+        )
+
+    def test_persistent_home_path_is_kept(self):
+        """A media directory already under /home needs no relocating."""
+        from inkpro.media import resolve_media_root
+
+        self.assertEqual(
+            resolve_media_root(
+                '/home/site/uploads', '', environ={'WEBSITE_SITE_NAME': 'inkpro'}
+            ),
+            pathlib.Path('/home/site/uploads/media'),
         )
 
     def test_deploycheck_fails_on_a_media_root_inside_the_deployed_tree(self):

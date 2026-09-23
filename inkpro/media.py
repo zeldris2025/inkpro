@@ -1,16 +1,21 @@
-"""Decide where uploaded media lives, so a deployment cannot erase it.
+"""Decide where uploaded media lives, so a restart cannot erase it.
 
-Azure App Service replaces the whole deployed tree — ``/home/site/wwwroot`` —
-on every deployment, and only ``/home`` survives a restart. Django's natural
-default, ``BASE_DIR / 'media'``, therefore sits exactly where the next push
-will wipe it: category photos, hero images and customer artwork disappear while
-the PostgreSQL rows that point at them survive, leaving a site full of broken
-images and no way to tell what was lost.
+On Azure App Service only ``/home`` is a real, persistent volume. Everything
+else the app can see is container-local scratch space that is thrown away when
+the container recycles — which App Service does on its own schedule, often
+several times a day, not only when you deploy. Two paths look deceptively
+permanent and are not:
 
-That failure is silent and irreversible, so the safe location is *detected*
-rather than left to a ``MEDIA_ROOT`` application setting somebody has to
-remember. An explicit ``MEDIA_ROOT`` always wins — a mounted Azure file share
-or a blob-backed path is better still.
+* ``/home/site/wwwroot`` is persistent but is replaced wholesale on deploy.
+* The directory the app actually runs from. An Oryx build extracts the app to
+  ``/tmp/8d…`` at boot, and a container image runs it from ``/app``. Both are
+  inside the container, so ``BASE_DIR / 'media'`` there survives exactly until
+  the next restart.
+
+So on App Service the default is ``/home/site/media`` — persistent, and outside
+the tree a deployment replaces — no matter where ``BASE_DIR`` happens to be.
+An explicit ``MEDIA_ROOT`` always wins; a mounted Azure file share or a
+blob-backed storage backend is better still.
 """
 
 from pathlib import Path
@@ -29,6 +34,25 @@ def on_azure_app_service(environ):
     App Service always sets ``WEBSITE_SITE_NAME``; nothing else does.
     """
     return bool(environ.get('WEBSITE_SITE_NAME'))
+
+
+def is_persistent(path):
+    """True when *path* survives a container restart and a deployment.
+
+    Only ``/home`` is mounted from durable storage, and the deployed tree
+    inside it is replaced on every push, so neither end of that is safe.
+    """
+    candidate = Path(path)
+    for probe in (candidate, candidate.resolve()):
+        try:
+            probe.relative_to(AZURE_PERSISTENT_ROOT.resolve())
+        except ValueError:
+            try:
+                probe.relative_to(AZURE_PERSISTENT_ROOT)
+            except ValueError:
+                return False
+        return not inside_deploy_tree(probe)
+    return False
 
 
 def inside_deploy_tree(path):
@@ -56,13 +80,13 @@ def resolve_media_root(base_dir, configured='', environ=None):
 
     An explicit *configured* path is honoured as given. Otherwise the default
     is ``base_dir/media`` locally, but ``/home/site/media`` on App Service,
-    where ``base_dir`` is inside the tree a deployment replaces.
+    where nothing outside ``/home`` outlives a container restart.
     """
     import os
 
     environ = os.environ if environ is None else environ
     if configured:
         return Path(configured)
-    if on_azure_app_service(environ) and inside_deploy_tree(base_dir):
+    if on_azure_app_service(environ) and not is_persistent(base_dir):
         return AZURE_MEDIA_ROOT
     return Path(base_dir) / 'media'
