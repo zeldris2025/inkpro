@@ -47,6 +47,27 @@ DEFAULT_COPY = {
         'intro': 'A new quote request came in from {name}.',
         'outro': '',
     },
+    EmailTemplate.APPLICATION_RECEIVED: {
+        'subject': 'We’ve received your InkPro account application',
+        'intro': 'Thanks {name} — we’ve received your application and your ID.',
+        'outro': 'Think Ink. Think Pro.',
+    },
+    EmailTemplate.STAFF_NEW_APPLICATION: {
+        'subject': 'New customer to verify: {name}',
+        'intro': '{name} has applied for an InkPro account and is waiting for their ID to be checked.',
+        'outro': '',
+    },
+    EmailTemplate.ACCOUNT_APPROVED: {
+        'subject': 'Your InkPro account is ready',
+        'intro': 'Welcome to InkPro, {name}. We’ve verified your details and your account is ready to use.',
+        'outro': 'Questions? Just reply to this email.',
+    },
+    EmailTemplate.APPLICATION_REJECTED: {
+        'subject': 'About your InkPro account application',
+        'intro': 'Hi {name}, thanks for applying for an InkPro account. '
+                 'Unfortunately we weren’t able to verify your details this time.',
+        'outro': 'If you think this is a mistake, just reply to this email.',
+    },
     EmailTemplate.PAYMENT_REMINDER: {
         'subject': 'Friendly reminder: invoice {invoice_no}',
         'intro': 'Hi {name}, invoice {invoice_no} is still showing as outstanding.',
@@ -198,6 +219,58 @@ def notify_staff_quote_response(quote):
         else f'Quote {quote.quote_number} was declined.\n{staff_url}'
     )
     return sent
+
+
+# -- account applications ----------------------------------------------------
+def send_application_received(application):
+    return send_branded_email(
+        to=application.email,
+        key=EmailTemplate.APPLICATION_RECEIVED,
+        template='main/email/application_received.html',
+        context={'application': application},
+        name=application.first_name,
+    )
+
+
+def notify_staff_new_application(application):
+    review_url = (
+        f"{settings.SITE_URL}{reverse('staff_application_detail', args=[application.pk])}"
+    )
+    sent = send_branded_email(
+        to=list(settings.STAFF_NOTIFY_EMAILS),
+        key=EmailTemplate.STAFF_NEW_APPLICATION,
+        template='main/email/staff_new_application.html',
+        context={'application': application, 'review_url': review_url},
+        name=application.full_name,
+    )
+    post_to_slack(f'*New customer to verify* {application.full_name}\n{review_url}')
+    return sent
+
+
+def send_account_approved(application, *, username, password):
+    """The sign-in details. The password is temporary and must be changed on first use."""
+    return send_branded_email(
+        to=application.email,
+        key=EmailTemplate.ACCOUNT_APPROVED,
+        template='main/email/account_approved.html',
+        context={
+            'application': application,
+            'username': username,
+            'password': password,
+            'login_url': f"{settings.SITE_URL}{reverse('login')}",
+        },
+        name=application.first_name,
+    )
+
+
+def send_application_rejected(application):
+    return send_branded_email(
+        to=application.email,
+        key=EmailTemplate.APPLICATION_REJECTED,
+        template='main/email/application_rejected.html',
+        context={'application': application},
+        name=application.first_name,
+    )
 
 
 def send_payment_reminder(invoice):

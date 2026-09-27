@@ -1,0 +1,11 @@
+{% extends "main/email/base_email.html" %}
+{% block email_body %}
+{% if application.rejection_reason %}
+<p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#a1a1aa;">From our team</p>
+<p style="margin:0 0 20px;padding:12px 14px;background:#fafafa;border-left:3px solid #FFD200;font-size:14px;color:#3f3f46;">{{ application.rejection_reason|linebreaksbr }}</p>
+{% endif %}
+<p style="margin:0 0 16px;font-size:14px;color:#3f3f46;">You’re welcome to apply again with a clear photo or scan of a current passport, driver’s licence or national ID.</p>
+<p style="text-align:center;margin:24px 0 0;">
+  <a href="{{ SITE_URL }}{% url 'signup' %}" style="display:inline-block;background:#0A0A0A;color:#FFD200;font-weight:800;font-size:15px;text-decoration:none;padding:14px 32px;border-radius:999px;">Apply again →</a>
+</p>
+{% endblock %}

@@ -1,7 +1,7 @@
 {% extends "main/account/base_auth.html" %}
 {% block title %}Sign in — InkPro{% endblock %}
 {% block auth_heading %}Welcome back.{% endblock %}
-{% block auth_intro %}Sign in to track your quotes and re-order past jobs.{% endblock %}
+{% block auth_intro %}Sign in to request quotes, track them and re-order past jobs.{% endblock %}
 {% block auth_body %}
 <form method="post">
   {% csrf_token %}
@@ -13,4 +13,4 @@
   </p>
 </form>
 {% endblock %}
-{% block auth_footer %}No account? <a href="{% url 'signup' %}" class="font-bold text-ink-yellow underline underline-offset-4">Create one</a>{% endblock %}
+{% block auth_footer %}New to InkPro? <a href="{% url 'signup' %}" class="font-bold text-ink-yellow underline underline-offset-4">Apply for an account</a>{% endblock %}

@@ -47,6 +47,12 @@ def absolute_logo_url(path=LOGO_ON_LIGHT):
     return url if url.startswith('http') else f'{settings.SITE_URL}{url}'
 
 
+def _pending_applications():
+    from .models import CustomerApplication
+
+    return CustomerApplication.objects.filter(status=CustomerApplication.PENDING).count()
+
+
 def site_settings(request):
     user = getattr(request, 'user', None)
     return {
@@ -58,6 +64,10 @@ def site_settings(request):
         'is_inkpro_staff': bool(
             user and user.is_authenticated and user.is_staff
         ),
+        # Callable, so the query only runs on the staff pages that show the badge.
+        'pending_applications_count': _pending_applications if (
+            user and user.is_authenticated and user.is_staff
+        ) else 0,
         # The site chrome is near-black, so pages use the on-dark variant.
         'LOGO_URL': _static_if_present(LOGO_ON_DARK),
         'LOGO_ON_LIGHT_URL': _static_if_present(LOGO_ON_LIGHT),

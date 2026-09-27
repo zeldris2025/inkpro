@@ -63,3 +63,18 @@ def owner_required(view):
         return view(request, *args, **kwargs)
 
     return wrapper
+
+
+def can_request_quotes(user):
+    """Staff, or a customer whose ID staff have checked.
+
+    Everyone else — anonymous visitors, and accounts that were never verified —
+    is sent to sign in or apply, so the team has identified the sender of
+    every request that reaches the quote inbox.
+    """
+    if not user.is_authenticated:
+        return False
+    if is_inkpro_staff(user):
+        return True
+    customer = getattr(user, 'customer', None)
+    return bool(customer and customer.is_verified)

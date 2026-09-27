@@ -216,6 +216,31 @@ EMAIL_TEMPLATES = [
         '',
     ),
     (
+        EmailTemplate.APPLICATION_RECEIVED,
+        'We’ve received your InkPro account application',
+        'Thanks {name} — we’ve received your application and your ID.',
+        'Think Ink, Think Pro',
+    ),
+    (
+        EmailTemplate.STAFF_NEW_APPLICATION,
+        'New customer to verify: {name}',
+        '{name} has applied for an InkPro account and is waiting for their ID to be checked.',
+        '',
+    ),
+    (
+        EmailTemplate.ACCOUNT_APPROVED,
+        'Your InkPro account is ready',
+        'Welcome to InkPro, {name}. We’ve verified your details and your account is ready to use.',
+        'Questions? Just reply to this email.',
+    ),
+    (
+        EmailTemplate.APPLICATION_REJECTED,
+        'About your InkPro account application',
+        'Hi {name}, thanks for applying for an InkPro account. Unfortunately we weren’t able '
+        'to verify your details this time.',
+        'If you think this is a mistake, just reply to this email.',
+    ),
+    (
         EmailTemplate.PAYMENT_REMINDER,
         'Friendly reminder: invoice {invoice_no}',
         'Hi {name}, our records show invoice {invoice_no} is still outstanding.',

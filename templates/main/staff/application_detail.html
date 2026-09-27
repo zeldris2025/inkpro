@@ -1,0 +1,90 @@
+{% extends "main/staff/base_staff.html" %}
+{% block staff_title %}{{ application.full_name }}{% endblock %}
+{% block staff_content %}
+<a href="{% url 'staff_application_list' %}?status={{ application.status }}" class="text-sm font-semibold text-white/50 transition hover:text-ink-yellow">← Customer verification</a>
+
+<div class="mt-5 flex flex-wrap items-start justify-between gap-5">
+  <div>
+    <h1 class="font-display text-3xl">{{ application.full_name }}</h1>
+    <p class="mt-1 text-sm text-white/45">Applied {{ application.submitted_at|date:"j M Y, g:ia" }} · {{ application.submitted_at|timesince }} ago</p>
+  </div>
+  <span class="rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest
+    {% if application.status == 'APPROVED' %}bg-green-500/20 text-green-300{% elif application.status == 'REJECTED' %}bg-red-500/20 text-red-300{% else %}bg-ink-yellow/20 text-ink-yellow{% endif %}">
+    {{ application.get_status_display }}
+  </span>
+</div>
+
+<div class="mt-7 grid gap-6 lg:grid-cols-5">
+  <!-- The ID -->
+  <div class="lg:col-span-3">
+    <div class="overflow-hidden rounded-xl border border-white/10 bg-black">
+      <div class="flex items-center justify-between border-b border-white/10 px-5 py-3">
+        <h2 class="text-xs font-bold uppercase tracking-widest text-white/50">Photo ID</h2>
+        <a href="{% url 'staff_application_id' application.pk %}" target="_blank" rel="noopener" class="text-xs font-bold text-ink-yellow hover:underline">Open full size ↗</a>
+      </div>
+      {% if application.id_is_pdf %}
+      <iframe src="{% url 'staff_application_id' application.pk %}" title="ID document" class="h-[560px] w-full bg-white"></iframe>
+      {% else %}
+      <div class="flex min-h-[320px] items-center justify-center bg-[repeating-conic-gradient(#18181b_0%_25%,#111_0%_50%)] bg-[length:20px_20px] p-4">
+        <img src="{% url 'staff_application_id' application.pk %}" alt="ID document for {{ application.full_name }}" class="max-h-[560px] w-auto rounded-lg shadow-2xl">
+      </div>
+      {% endif %}
+    </div>
+    <p class="mt-3 text-xs text-white/35">Check the name matches, the photo is clear, and the document is current. This file is private — only staff can open it.</p>
+  </div>
+
+  <!-- Details + decision -->
+  <div class="space-y-5 lg:col-span-2">
+    <div class="rounded-xl border border-white/10 bg-white/5 p-6">
+      <h2 class="text-xs font-bold uppercase tracking-widest text-white/40">Applicant</h2>
+      <dl class="mt-4 space-y-3 text-sm">
+        <div class="flex justify-between gap-4"><dt class="text-white/50">First name</dt><dd class="font-semibold">{{ application.first_name }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-white/50">Last name</dt><dd class="font-semibold">{{ application.last_name }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-white/50">Email</dt><dd class="truncate"><a href="mailto:{{ application.email }}" class="hover:text-ink-yellow">{{ application.email }}</a></dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-white/50">Phone</dt><dd><a href="tel:{{ application.phone }}" class="hover:text-ink-yellow">{{ application.phone }}</a></dd></div>
+        {% if application.submitted_ip %}<div class="flex justify-between gap-4"><dt class="text-white/50">IP address</dt><dd class="font-mono text-xs text-white/60">{{ application.submitted_ip }}</dd></div>{% endif %}
+      </dl>
+    </div>
+
+    {% if related %}
+    <div class="rounded-xl border border-ink-magenta/30 bg-ink-magenta/10 p-5 text-sm">
+      <h2 class="text-xs font-bold uppercase tracking-widest text-ink-magenta">Same email or phone used before</h2>
+      <ul class="mt-3 space-y-1.5">
+        {% for other in related %}
+        <li><a href="{% url 'staff_application_detail' other.pk %}" class="font-semibold hover:underline">{{ other.full_name }}</a> <span class="text-white/45">· {{ other.get_status_display|lower }} · {{ other.submitted_at|date:"j M Y" }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if application.status == 'PENDING' %}
+    <div class="rounded-xl border border-ink-yellow/30 bg-ink-yellow/5 p-6" x-data="{ rejecting: false }">
+      <h2 class="font-display text-lg">Decision</h2>
+      <form method="post" action="{% url 'staff_application_decide' application.pk %}" class="mt-4"
+            onsubmit="return confirm('Approve {{ application.full_name|escapejs }} and email their sign-in details to {{ application.email|escapejs }}?')">
+        {% csrf_token %}<input type="hidden" name="decision" value="approve">
+        <button type="submit" class="ink-btn w-full justify-center py-3.5 text-base">✓ Approve &amp; send login</button>
+      </form>
+      <p class="mt-3 text-xs leading-relaxed text-white/50">Creates their account, marks them verified and emails a username, a temporary password and a link to sign in. They must choose their own password on first sign-in.</p>
+
+      <div class="mt-5 border-t border-white/10 pt-5">
+        <button type="button" @click="rejecting = !rejecting" class="text-sm font-bold text-red-300 hover:text-red-200">Reject application…</button>
+        <form x-show="rejecting" x-cloak x-transition method="post" action="{% url 'staff_application_decide' application.pk %}" class="mt-3 space-y-3">
+          {% csrf_token %}<input type="hidden" name="decision" value="reject">
+          <label for="reason" class="block text-xs font-bold uppercase tracking-widest text-white/40">Reason (sent to the applicant)</label>
+          <textarea id="reason" name="reason" rows="3" placeholder="e.g. The ID photo was blurry — please apply again with a clearer picture."
+                    class="w-full rounded-lg border border-white/15 bg-black/40 px-4 py-3 text-sm text-white placeholder-white/35 focus:border-ink-yellow focus:outline-none"></textarea>
+          <button type="submit" class="w-full rounded-full border border-red-400/40 px-5 py-2.5 text-sm font-bold text-red-300 transition hover:bg-red-500/10">Reject &amp; notify</button>
+        </form>
+      </div>
+    </div>
+    {% else %}
+    <div class="rounded-xl border p-6 text-sm {% if application.status == 'APPROVED' %}border-green-400/30 bg-green-500/10{% else %}border-red-400/30 bg-red-500/10{% endif %}">
+      <p class="font-bold">{{ application.get_status_display }} by {{ application.reviewed_by.username|default:"—" }} on {{ application.reviewed_at|date:"j M Y, g:ia" }}.</p>
+      {% if application.customer %}<p class="mt-2 text-white/65">Username: <span class="font-mono">{{ application.customer.user.username }}</span>{% if application.customer.must_change_password %} · hasn’t signed in yet{% endif %}</p>{% endif %}
+      {% if application.rejection_reason %}<p class="mt-2 text-white/65">Reason given: {{ application.rejection_reason }}</p>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

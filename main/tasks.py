@@ -84,6 +84,22 @@ def notify_staff_quote_response_task(quote_id):
 
 
 @_task
+def send_application_received_task(application_id):
+    from .emails import send_application_received
+    from .models import CustomerApplication
+
+    return send_application_received(CustomerApplication.objects.get(pk=application_id))
+
+
+@_task
+def notify_staff_new_application_task(application_id):
+    from .emails import notify_staff_new_application
+    from .models import CustomerApplication
+
+    return notify_staff_new_application(CustomerApplication.objects.get(pk=application_id))
+
+
+@_task
 def build_quote_pdf_task(quote_id):
     from .models import Quote
     from .pdf import attach_pdf_to_quote

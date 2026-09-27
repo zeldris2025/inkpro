@@ -8,11 +8,18 @@ from django.contrib.auth.forms import (
     PasswordChangeForm,
     PasswordResetForm,
     SetPasswordForm,
-    UserCreationForm,
 )
 from django.contrib.auth.models import User
 
-from .models import Customer, Invoice, PricingRule, Quote, QuoteItem, ServiceCategory
+from .models import (
+    Customer,
+    CustomerApplication,
+    Invoice,
+    PricingRule,
+    Quote,
+    QuoteItem,
+    ServiceCategory,
+)
 
 INPUT = (
     'w-full rounded-lg border border-white/15 bg-black/40 px-4 py-3 text-white '
@@ -290,66 +297,98 @@ class CustomerProfileForm(forms.ModelForm):
         style(self.fields)
 
 
-class SignUpForm(UserCreationForm):
-    """Account creation that also provisions the linked Customer record."""
+#: File signatures accepted as an ID document. Checked against the bytes, not
+#: the filename, so a renamed executable or HTML page is refused.
+ID_SIGNATURES = {
+    '.pdf': (b'%PDF-',),
+    '.jpg': (b'\xff\xd8\xff',),
+    '.jpeg': (b'\xff\xd8\xff',),
+    '.png': (b'\x89PNG\r\n\x1a\n',),
+}
 
-    email = forms.EmailField(required=True)
-    name = forms.CharField(max_length=200, required=False, label='Name')
-    company_name = forms.CharField(max_length=200, required=False, label='Company (optional)')
-    phone = forms.CharField(max_length=50, required=False)
+
+class CustomerApplicationForm(forms.ModelForm):
+    """Apply for an account. Staff check the ID before any login exists."""
+
+    #: Left empty by people; filled in by form-stuffing bots.
+    website = forms.CharField(required=False, widget=forms.TextInput(attrs={
+        'tabindex': '-1', 'autocomplete': 'off',
+    }))
+    consent = forms.BooleanField(
+        label='I confirm this is my own ID, and I agree to InkPro keeping it to verify my account.',
+    )
 
     class Meta:
-        model = User
-        fields = ['username', 'email', 'password1', 'password2']
+        model = CustomerApplication
+        fields = ['first_name', 'last_name', 'email', 'phone', 'id_document']
+        labels = {
+            'first_name': 'First name',
+            'last_name': 'Last name',
+            'email': 'Email address',
+            'phone': 'Phone number',
+            'id_document': 'Photo ID',
+        }
+        help_texts = {
+            'id_document': 'Passport, driver\u2019s licence or national ID. A clear photo or scan '
+                           '\u2014 JPG, PNG or PDF, up to 8 MB. Only InkPro staff can see it.',
+        }
+        widgets = {
+            'first_name': forms.TextInput(attrs={'autocomplete': 'given-name'}),
+            'last_name': forms.TextInput(attrs={'autocomplete': 'family-name'}),
+            'email': forms.EmailInput(attrs={'autocomplete': 'email', 'placeholder': 'you@example.com'}),
+            'phone': forms.TextInput(attrs={'autocomplete': 'tel', 'inputmode': 'tel'}),
+            'id_document': forms.ClearableFileInput(attrs={'accept': '.jpg,.jpeg,.png,.pdf'}),
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         style(self.fields)
 
-    def clean_username(self):
-        """Reject a username that differs from an existing one only by case.
-
-        Django's own uniqueness check is already case-insensitive, but doing it
-        here lets us give a message that points at the way out — signing in or
-        resetting the password — instead of a dead end.
-        """
-        username = self.cleaned_data['username'].strip()
-        if User.objects.filter(username__iexact=username).exists():
-            raise forms.ValidationError(
-                'That username is already taken. Try signing in instead, '
-                'or reset your password if you have forgotten it.'
-            )
-        return username
+    def clean_website(self):
+        if self.cleaned_data.get('website'):
+            raise forms.ValidationError('Please leave this field empty.')
+        return ''
 
     def clean_email(self):
-        # Stored lowercase so the address is unambiguous for password resets
-        # and for matching guest quotes raised before the account existed.
         email = self.cleaned_data['email'].strip().lower()
         if User.objects.filter(email__iexact=email).exists():
             raise forms.ValidationError(
                 'An account already uses that email address. Try signing in, '
                 'or reset your password if you have forgotten it.'
             )
+        if CustomerApplication.objects.filter(
+            email__iexact=email, status=CustomerApplication.PENDING
+        ).exists():
+            raise forms.ValidationError(
+                'We already have an application for this email and are checking it. '
+                'We\u2019ll email you as soon as it\u2019s approved.'
+            )
         return email
 
-    def save(self, commit=True):
-        user = super().save(commit=False)
-        user.email = self.cleaned_data['email']
-        if commit:
-            user.save()
-            Customer.objects.create(
-                user=user,
-                name=self.cleaned_data.get('name', ''),
-                email=user.email,
-                company_name=self.cleaned_data.get('company_name', ''),
-                phone=self.cleaned_data.get('phone', ''),
-                customer_type=(
-                    Customer.BUSINESS
-                    if self.cleaned_data.get('company_name')
-                    else Customer.INDIVIDUAL
-                ),
+    def clean_phone(self):
+        phone = self.cleaned_data['phone'].strip()
+        if sum(ch.isdigit() for ch in phone) < 5:
+            raise forms.ValidationError('Enter a phone number we can reach you on.')
+        return phone
+
+    def clean_id_document(self):
+        from pathlib import Path
+
+        from django.conf import settings
+
+        upload = self.cleaned_data['id_document']
+        suffix = Path(upload.name).suffix.lower()
+        if suffix not in ID_SIGNATURES:
+            raise forms.ValidationError('Upload a JPG, PNG or PDF file.')
+        if upload.size > settings.ID_DOCUMENT_MAX_BYTES:
+            raise forms.ValidationError('That file is over 8 MB. Try a smaller photo or scan.')
+        head = upload.read(16)
+        upload.seek(0)
+        if not head.startswith(ID_SIGNATURES[suffix]):
+            raise forms.ValidationError(
+                'That file doesn\u2019t look like a real JPG, PNG or PDF. Try exporting it again.'
             )
-        return user
+        return upload
 
 
 class ContactForm(forms.Form):

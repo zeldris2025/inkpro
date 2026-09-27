@@ -6,6 +6,7 @@ venv/
 .venv/
 staticfiles/
 media/
+private/
 .DS_Store
 .idea/
 .vscode/

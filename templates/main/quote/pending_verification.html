@@ -1,0 +1,16 @@
+{% extends "main/account/base_auth.html" %}
+{% block title %}Account awaiting verification — InkPro{% endblock %}
+{% block auth_icon %}
+<div class="mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-ink-cyan/15 text-ink-cyan">
+  <svg class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 7v5l3 2"/></svg>
+</div>
+{% endblock %}
+{% block auth_heading %}Your account isn’t verified yet.{% endblock %}
+{% block auth_intro %}Only verified customers can request quotes. If you’ve recently applied, we’re checking your details and will email you once you’re approved.{% endblock %}
+{% block auth_body %}
+<p class="text-sm text-white/60">Think this is a mistake, or need a quote urgently? Get in touch and we’ll sort it out.</p>
+<div class="mt-6 flex flex-wrap gap-3">
+  <a href="{% url 'contact' %}" class="ink-btn">Contact us</a>
+  <a href="{% url 'my_quotes' %}" class="ink-btn-ghost">My quotes</a>
+</div>
+{% endblock %}

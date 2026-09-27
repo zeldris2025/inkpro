@@ -1,0 +1,54 @@
+{% extends "main/staff/base_staff.html" %}
+{% block staff_title %}Customers{% endblock %}
+{% block staff_content %}
+<div class="flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-3xl">Customer verification</h1>
+    <p class="mt-1 text-sm text-white/45">Check each applicant’s ID before they can request quotes. Approving emails them a username and temporary password.</p>
+  </div>
+</div>
+
+<nav class="mt-7 flex flex-wrap gap-2" aria-label="Filter by status">
+  {% for value, label, count in tabs %}
+  <a href="?status={{ value }}"
+     class="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition {% if status == value %}bg-ink-yellow text-black{% else %}border border-white/15 text-white/60 hover:border-white/40 hover:text-white{% endif %}">
+    {{ label }}
+    <span class="rounded-full px-2 py-0.5 text-xs {% if status == value %}bg-black/15{% elif value == 'PENDING' and count %}bg-ink-magenta text-white{% else %}bg-white/10{% endif %}">{{ count }}</span>
+  </a>
+  {% endfor %}
+</nav>
+
+<div class="mt-6 overflow-hidden rounded-xl border border-white/10">
+  <table class="w-full text-left text-sm">
+    <thead class="bg-white/5 text-xs uppercase tracking-wider text-white/45">
+      <tr>
+        <th class="px-5 py-3">Applicant</th>
+        <th class="hidden px-5 py-3 md:table-cell">Phone</th>
+        <th class="px-5 py-3">Applied</th>
+        {% if status != 'PENDING' %}<th class="hidden px-5 py-3 md:table-cell">Decided by</th>{% endif %}
+        <th class="px-5 py-3"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-white/5">
+      {% for application in applications %}
+      <tr class="transition hover:bg-white/5">
+        <td class="px-5 py-4">
+          <a href="{% url 'staff_application_detail' application.pk %}" class="font-bold hover:text-ink-yellow">{{ application.full_name }}</a>
+          <div class="text-xs text-white/40">{{ application.email }}</div>
+        </td>
+        <td class="hidden px-5 py-4 text-white/60 md:table-cell">{{ application.phone }}</td>
+        <td class="px-5 py-4 text-white/60" title="{{ application.submitted_at|date:'j M Y, g:ia' }}">{{ application.submitted_at|timesince }} ago</td>
+        {% if status != 'PENDING' %}<td class="hidden px-5 py-4 text-white/60 md:table-cell">{{ application.reviewed_by.username|default:"—" }}<div class="text-xs text-white/35">{{ application.reviewed_at|date:"j M Y" }}</div></td>{% endif %}
+        <td class="px-5 py-4 text-right">
+          <a href="{% url 'staff_application_detail' application.pk %}" class="rounded-full {% if status == 'PENDING' %}bg-ink-yellow text-black{% else %}border border-white/15 text-white/70{% endif %} px-4 py-1.5 text-xs font-bold transition hover:opacity-90">{% if status == 'PENDING' %}Review ID →{% else %}View{% endif %}</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="px-5 py-16 text-center text-white/40">
+        {% if status == 'PENDING' %}All caught up — no one is waiting for verification.{% else %}Nothing here yet.{% endif %}
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

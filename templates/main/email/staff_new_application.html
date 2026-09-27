@@ -1,0 +1,18 @@
+{% extends "main/email/base_email.html" %}
+{% block email_body %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;border:1px solid #e4e4e7;border-radius:10px;margin:20px 0;">
+  <tr><td style="padding:18px 20px;font-size:14px;color:#3f3f46;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr><td style="padding:4px 0;">Name</td><td align="right" style="font-weight:700;color:#18181b;">{{ application.full_name }}</td></tr>
+      <tr><td style="padding:4px 0;">Email</td><td align="right" style="color:#18181b;">{{ application.email }}</td></tr>
+      <tr><td style="padding:4px 0;">Phone</td><td align="right" style="color:#18181b;">{{ application.phone }}</td></tr>
+      <tr><td style="padding:4px 0;">ID document</td><td align="right" style="color:#18181b;">{% if application.id_is_pdf %}PDF{% else %}Image{% endif %} attached to the application</td></tr>
+      <tr><td style="padding:4px 0;">Applied</td><td align="right" style="color:#18181b;">{{ application.submitted_at|date:"j M Y, g:ia" }}</td></tr>
+    </table>
+  </td></tr>
+</table>
+<p style="margin:0;font-size:14px;color:#52525b;">For privacy the ID isn’t attached to this email. Open the application in the staff panel to check it, then approve or reject. Approving emails the customer their sign-in details.</p>
+<p style="text-align:center;margin:24px 0 0;">
+  <a href="{{ review_url }}" style="display:inline-block;background:#0A0A0A;color:#FFD200;font-weight:800;font-size:15px;text-decoration:none;padding:14px 32px;border-radius:999px;">Review &amp; verify →</a>
+</p>
+{% endblock %}

@@ -3,6 +3,15 @@
 {% block head_extra %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>{% endblock %}
 
 {% block staff_content %}
+{% if pending_applications %}
+<a href="{% url 'staff_application_list' %}" class="mb-6 flex items-center justify-between gap-4 rounded-xl border border-ink-magenta/40 bg-ink-magenta/10 px-5 py-4 transition hover:border-ink-magenta">
+  <span class="flex items-center gap-3">
+    <span class="flex h-9 w-9 items-center justify-center rounded-full bg-ink-magenta font-display text-sm text-white">{{ pending_applications }}</span>
+    <span><strong>{{ pending_applications }} new customer{{ pending_applications|pluralize }}</strong> waiting for ID verification.</span>
+  </span>
+  <span class="text-sm font-bold text-ink-magenta">Review →</span>
+</a>
+{% endif %}
 <div class="flex flex-wrap items-end justify-between gap-4">
   <div>
     <h1 class="font-display text-3xl">Dashboard</h1>

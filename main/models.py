@@ -5,6 +5,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.files.storage import FileSystemStorage
 from django.db import models, transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -15,6 +16,44 @@ from . import pricing
 def _token():
     """URL-safe token backing the no-login quote view link emailed to customers."""
     return secrets.token_urlsafe(32)
+
+
+class PrivateStorage(FileSystemStorage):
+    """Storage for identity documents, outside the publicly served media root.
+
+    The location is read from settings on every use rather than fixed when the
+    model loads — a ``storage=`` callable is only evaluated once, at import —
+    so a changed ``PRIVATE_MEDIA_ROOT`` is always honoured. There is no base
+    URL: these files are only ever streamed by a staff-only view.
+    """
+
+    def __init__(self):
+        super().__init__(base_url=None)
+
+    @property
+    def base_location(self):
+        return str(settings.PRIVATE_MEDIA_ROOT)
+
+    @property
+    def location(self):
+        import os
+
+        return os.path.abspath(self.base_location)
+
+    def deconstruct(self):
+        return ('main.models.PrivateStorage', (), {})
+
+
+def private_storage():
+    return PrivateStorage()
+
+
+def id_document_path(instance, filename):
+    """A random name: the customer's own filename can carry their name or ID number."""
+    from pathlib import Path
+
+    suffix = Path(filename).suffix.lower()
+    return f'id-documents/{timezone.now():%Y/%m}/{secrets.token_hex(16)}{suffix}'
 
 
 class ServiceCategory(models.Model):
@@ -231,6 +270,14 @@ class Customer(models.Model):
     customer_type = models.CharField(
         max_length=20, choices=CUSTOMER_TYPE_CHOICES, default=INDIVIDUAL
     )
+    is_verified = models.BooleanField(
+        default=False,
+        help_text='Staff have checked this customer\'s ID. Only verified customers can request quotes.',
+    )
+    must_change_password = models.BooleanField(
+        default=False,
+        help_text='Set when staff issue a temporary password; cleared once the customer picks their own.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -252,6 +299,56 @@ class Customer(models.Model):
     @property
     def contact_email(self):
         return self.email or (self.user.email if self.user else '')
+
+
+class CustomerApplication(models.Model):
+    """A request for an account, held until staff have checked the ID.
+
+    No login exists while an application is pending: approving it is what
+    creates the user, so an unverified visitor has nothing to sign in with.
+    """
+
+    PENDING = 'PENDING'
+    APPROVED = 'APPROVED'
+    REJECTED = 'REJECTED'
+    STATUS_CHOICES = [(PENDING, 'Pending'), (APPROVED, 'Approved'), (REJECTED, 'Rejected')]
+
+    first_name = models.CharField(max_length=100)
+    last_name = models.CharField(max_length=100)
+    email = models.EmailField()
+    phone = models.CharField(max_length=50)
+    id_document = models.FileField(
+        upload_to=id_document_path, storage=private_storage, max_length=255
+    )
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=PENDING, db_index=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    submitted_ip = models.GenericIPAddressField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='reviewed_applications',
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+    customer = models.OneToOneField(
+        Customer, null=True, blank=True, on_delete=models.SET_NULL, related_name='application'
+    )
+
+    class Meta:
+        ordering = ['-submitted_at']
+
+    def __str__(self):
+        return f'{self.full_name} <{self.email}>'
+
+    @property
+    def full_name(self):
+        return f'{self.first_name} {self.last_name}'.strip()
+
+    @property
+    def id_is_pdf(self):
+        return self.id_document.name.lower().endswith('.pdf')
 
 
 class QuoteQuerySet(models.QuerySet):
@@ -668,12 +765,20 @@ class EmailTemplate(models.Model):
     STAFF_NEW_QUOTE = 'STAFF_NEW_QUOTE'
     STAFF_QUOTE_RESPONSE = 'STAFF_QUOTE_RESPONSE'
     PAYMENT_REMINDER = 'PAYMENT_REMINDER'
+    APPLICATION_RECEIVED = 'APPLICATION_RECEIVED'
+    STAFF_NEW_APPLICATION = 'STAFF_NEW_APPLICATION'
+    ACCOUNT_APPROVED = 'ACCOUNT_APPROVED'
+    APPLICATION_REJECTED = 'APPLICATION_REJECTED'
     KEY_CHOICES = [
         (QUOTE_RECEIVED, 'Customer — quote request received'),
         (QUOTE_SENT, 'Customer — your quote is ready'),
         (QUOTE_ACCEPTED, 'Customer — final quote after accepting'),
         (STAFF_NEW_QUOTE, 'Staff — new quote request'),
         (STAFF_QUOTE_RESPONSE, 'Staff — customer accepted or declined'),
+        (APPLICATION_RECEIVED, 'Customer — account application received'),
+        (STAFF_NEW_APPLICATION, 'Staff — new account application'),
+        (ACCOUNT_APPROVED, 'Customer — account approved, sign-in details'),
+        (APPLICATION_REJECTED, 'Customer — account application not approved'),
         (PAYMENT_REMINDER, 'Customer — payment reminder'),
     ]
 

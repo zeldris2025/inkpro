@@ -9,6 +9,11 @@
       <a href="{{ u_dash }}" class="rounded-full px-4 py-1.5 text-sm font-semibold transition {% if request.path == u_dash %}bg-ink-yellow text-black{% else %}text-white/60 hover:bg-white/10 hover:text-white{% endif %}">Dashboard</a>
       <a href="{{ u_inbox }}" class="rounded-full px-4 py-1.5 text-sm font-semibold transition {% if '/staff/quotes' in request.path %}bg-ink-yellow text-black{% else %}text-white/60 hover:bg-white/10 hover:text-white{% endif %}">Quotes</a>
       <a href="{{ u_reg }}" class="rounded-full px-4 py-1.5 text-sm font-semibold transition {% if '/staff/register' in request.path %}bg-ink-yellow text-black{% else %}text-white/60 hover:bg-white/10 hover:text-white{% endif %}">Register</a>
+      {% url 'staff_application_list' as u_apps %}{% with pending=pending_applications_count %}
+      <a href="{{ u_apps }}" class="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold transition {% if '/staff/customers' in request.path %}bg-ink-yellow text-black{% else %}text-white/60 hover:bg-white/10 hover:text-white{% endif %}">
+        Customers
+        {% if pending %}<span class="rounded-full bg-ink-magenta px-1.5 py-0.5 text-[10px] font-bold leading-none text-white" title="{{ pending }} awaiting verification">{{ pending }}</span>{% endif %}
+      </a>{% endwith %}
       <a href="/admin/" class="ml-auto rounded-full px-4 py-1.5 text-sm font-semibold text-white/40 transition hover:text-white">Django admin ↗</a>
     </div>
   </div>

@@ -2,11 +2,12 @@
 
 from django.contrib import messages
 from django.conf import settings
-from django.contrib.auth import login
+from functools import wraps
+
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Prefetch, Q, Sum
-from django.http import HttpResponse, HttpResponseBadRequest
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
@@ -15,12 +16,13 @@ from . import pricing
 from .emails import post_to_slack
 from .forms import (
     ContactForm,
-    StyledPasswordResetForm,
+    CustomerApplicationForm,
     CustomerProfileForm,
     QuoteItemForm,
     QuotePriceProbeForm,
     QuoteSubmitForm,
-    SignUpForm,
+    StyledPasswordChangeForm,
+    StyledPasswordResetForm,
 )
 from .models import (
     CategoryImage,
@@ -33,11 +35,13 @@ from .models import (
     ServiceCategory,
     UrgentFee,
 )
-from .permissions import CUSTOMER_GROUP
+from .permissions import can_request_quotes
 from .tasks import (
+    notify_staff_new_application_task,
     notify_staff_new_quote_task,
     notify_staff_quote_response_task,
     run_task,
+    send_application_received_task,
     send_quote_accepted_task,
     send_quote_received_task,
 )
@@ -157,6 +161,30 @@ def quote_context(quote):
     }
 
 
+def verified_customer_required(view):
+    """Only signed-in, ID-verified customers (and staff) may build a quote.
+
+    Anonymous visitors see the sign-in-or-apply page; signed-in customers whose
+    account is not verified are told it is still being checked. HTMX partials
+    get a bare 403 rather than a whole page swapped into the sidebar.
+    """
+
+    @wraps(view)
+    def wrapped(request, *args, **kwargs):
+        if can_request_quotes(request.user):
+            return view(request, *args, **kwargs)
+        if request.headers.get('HX-Request'):
+            return HttpResponseForbidden('Sign in with a verified account to request a quote.')
+        if not request.user.is_authenticated:
+            return render(
+                request, 'main/quote/access.html', {'next': request.get_full_path()}, status=200
+            )
+        return render(request, 'main/quote/pending_verification.html', status=403)
+
+    return wrapped
+
+
+@verified_customer_required
 def quote_builder(request):
     """Step 1 — choose a service category."""
     quote = get_draft_quote(request, create=False)
@@ -167,6 +195,7 @@ def quote_builder(request):
     )
 
 
+@verified_customer_required
 def quote_configure(request, slug):
     """Steps 2-3 — choose an option, size it, set quantity, attach artwork."""
     category = get_object_or_404(ServiceCategory, slug=slug, is_active=True)
@@ -197,6 +226,7 @@ def quote_configure(request, slug):
 
 
 @require_POST
+@verified_customer_required
 def quote_remove_item(request, item_id):
     quote = get_draft_quote(request, create=False)
     if quote:
@@ -207,6 +237,7 @@ def quote_remove_item(request, item_id):
     return redirect('quote_review')
 
 
+@verified_customer_required
 def quote_review(request):
     """Final step — contact details, urgency and submission."""
     quote = get_draft_quote(request, create=False)
@@ -245,6 +276,7 @@ def quote_submitted(request, token):
 
 
 @require_POST
+@verified_customer_required
 def quote_toggle_urgent(request):
     """HTMX endpoint behind the "need it urgently?" switch."""
     quote = get_draft_quote(request, create=False)
@@ -257,6 +289,7 @@ def quote_toggle_urgent(request):
     return render(request, 'main/quote/_summary.html', quote_context(quote))
 
 
+@verified_customer_required
 def quote_summary_partial(request):
     """HTMX polling target for the live price sidebar."""
     return render(
@@ -389,25 +422,68 @@ def create_invoice_for_quote(quote):
 
 # --- accounts ---------------------------------------------------------------
 def signup(request):
-    form = SignUpForm(request.POST or None)
-    if request.method == 'POST' and form.is_valid():
-        user = form.save()
-        from django.contrib.auth.models import Group
-
-        group, _ = Group.objects.get_or_create(name=CUSTOMER_GROUP)
-        user.groups.add(group)
-        # The user was just created rather than authenticated, so it carries no
-        # `backend` attribute. With more than one backend configured Django
-        # cannot guess which to record on the session, so name it explicitly.
-        login(request, user, backend=settings.AUTHENTICATION_BACKENDS[0])
-        # Carry any in-progress draft over to the new account.
-        draft = get_draft_quote(request, create=False)
-        if draft and not draft.customer:
-            draft.customer = user.customer
-            draft.save(update_fields=['customer'])
-        messages.success(request, f'Welcome to InkPro, {user.username}.')
+    """Apply for an account. Staff check the ID; approval emails the login."""
+    if request.user.is_authenticated:
         return redirect('my_quotes')
+    form = CustomerApplicationForm(request.POST or None, request.FILES or None)
+    if request.method == 'POST' and form.is_valid():
+        application = form.save(commit=False)
+        application.submitted_ip = client_ip(request)
+        application.save()
+        run_task(send_application_received_task, application.pk)
+        run_task(notify_staff_new_application_task, application.pk)
+        request.session['applied_as'] = application.first_name
+        return redirect('signup_done')
     return render(request, 'main/account/signup.html', {'form': form})
+
+
+def signup_done(request):
+    return render(
+        request, 'main/account/signup_done.html', {'first_name': request.session.get('applied_as', '')}
+    )
+
+
+def client_ip(request):
+    """Best-effort client address, for spotting repeat abuse in the staff panel.
+
+    App Service puts the real address first in X-Forwarded-For; locally there
+    is no proxy and REMOTE_ADDR is the client.
+    """
+    from django.core.exceptions import ValidationError
+    from django.core.validators import validate_ipv46_address
+
+    forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
+    candidate = (forwarded.split(',')[0] if forwarded else request.META.get('REMOTE_ADDR', ''))
+    candidate = candidate.strip()
+    # Azure appends the port ("1.2.3.4:5678") to IPv4 addresses.
+    if candidate.count(':') == 1:
+        candidate = candidate.split(':')[0]
+    try:
+        validate_ipv46_address(candidate)
+    except ValidationError:
+        return None
+    return candidate
+
+
+class FirstLoginPasswordChangeView(auth_views.PasswordChangeView):
+    """Password change that also lifts the "must change password" block."""
+
+    template_name = 'main/account/password_change.html'
+    form_class = StyledPasswordChangeForm
+    success_url = reverse_lazy('password_change_done')
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        Customer.objects.filter(user=self.request.user, must_change_password=True).update(
+            must_change_password=False
+        )
+        return response
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        customer = getattr(self.request.user, 'customer', None)
+        context['first_login'] = bool(customer and customer.must_change_password)
+        return context
 
 
 def quotes_for_user(user):
@@ -445,8 +521,8 @@ def my_quote_detail(request, pk):
     )
 
 
-@login_required
 @require_POST
+@verified_customer_required
 def reorder_quote(request, pk):
     """Copy a past quote's lines into a fresh draft so it can be re-submitted."""
     source = get_object_or_404(quotes_for_user(request.user), pk=pk)
