@@ -1,0 +1,72 @@
+{% comment %}
+White Sunday announcement bar, across the top of every page in the weeks
+before Lotu a Tamaiti (see context_processors.upcoming_white_sunday).
+
+Same seamless-loop technique as the hero marquee: the track holds the messages
+twice and slides exactly -50%, animating only `transform`. Screen readers get
+one static copy; the moving track is hidden from them. It pauses on hover and
+stops under prefers-reduced-motion.
+
+It sits in normal flow above the fixed header, and the header is pushed down
+by the bar's height until the bar scrolls away (see base.html). Dismissing it
+is remembered per browser for the year, via a class set on <html> before the
+page paints so a dismissed bar never flashes back in.
+{% endcomment %}
+{% with day=WHITE_SUNDAY.date %}
+<div id="ink-announce" class="ink-announce" role="region" aria-label="White Sunday">
+  <div class="ink-announce__inner">
+    <span class="ink-announce__label">
+      <svg class="ink-announce__flower" viewBox="0 0 24 24" aria-hidden="true">
+        <g transform="translate(12 12)">
+          <ellipse rx="3.6" ry="6.6" cy="-5.2" transform="rotate(0)"/>
+          <ellipse rx="3.6" ry="6.6" cy="-5.2" transform="rotate(72)"/>
+          <ellipse rx="3.6" ry="6.6" cy="-5.2" transform="rotate(144)"/>
+          <ellipse rx="3.6" ry="6.6" cy="-5.2" transform="rotate(216)"/>
+          <ellipse rx="3.6" ry="6.6" cy="-5.2" transform="rotate(288)"/>
+          <circle r="2.4" class="ink-announce__flower-heart"/>
+        </g>
+      </svg>
+      <span class="ink-announce__label-text">White Sunday <span class="ink-announce__date">· {{ day|date:"j M" }}</span></span>
+    </span>
+
+    <div class="ink-announce__marquee">
+      <span class="sr-only">
+        {% if WHITE_SUNDAY.arrived %}Manuia le Lotu a Tamaiti — Happy White Sunday from all of us at InkPro.
+        {% else %}Manuia le Lotu a Tamaiti — White Sunday is {{ day|date:"l j F" }}. Celebrate your children with custom banners, canvas prints and stickers, and order early so everything is ready in time.{% endif %}
+      </span>
+      <div class="ink-announce__track" aria-hidden="true">
+        {% for _ in "12" %}
+          {% if WHITE_SUNDAY.arrived %}
+          <span class="ink-announce__item"><em>Manuia le Lotu a Tamaiti</em> — Happy White Sunday from all of us at InkPro</span>
+          <span class="ink-announce__sep">✦</span>
+          <span class="ink-announce__item">Celebrating every child in white today</span>
+          <span class="ink-announce__sep">✦</span>
+          {% else %}
+          <span class="ink-announce__item"><em>Manuia le Lotu a Tamaiti</em> — White Sunday is {{ day|date:"l j F" }}</span>
+          <span class="ink-announce__sep">✦</span>
+          <span class="ink-announce__item">Celebrate your children in style — custom banners, canvas prints &amp; stickers</span>
+          <span class="ink-announce__sep">✦</span>
+          <span class="ink-announce__item">Order early so everything is printed and ready for the big day</span>
+          <span class="ink-announce__sep">✦</span>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if not WHITE_SUNDAY.arrived %}
+    <a href="{% url 'quote_builder' %}" class="ink-announce__cta">Order now <span aria-hidden="true">→</span></a>
+    {% endif %}
+    <button type="button" class="ink-announce__close" aria-label="Dismiss the White Sunday announcement"
+            onclick="inkDismissAnnouncement()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+</div>
+<script>
+  function inkDismissAnnouncement() {
+    document.documentElement.classList.add('ink-announce-dismissed');
+    try { localStorage.setItem('inkpro-white-sunday-{{ day|date:"Y" }}', '1'); } catch (e) {}
+    window.dispatchEvent(new CustomEvent('announce-changed'));
+  }
+</script>
+{% endwith %}

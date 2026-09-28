@@ -35,11 +35,16 @@ tailwind.config = {
 <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
 {% block head_extra %}{% endblock %}
+{% if WHITE_SUNDAY %}
+{# Before first paint, so a bar this browser has dismissed never flashes in. #}
+<script>try { if (localStorage.getItem('inkpro-white-sunday-{{ WHITE_SUNDAY.date|date:"Y" }}') === '1') document.documentElement.classList.add('ink-announce-dismissed'); } catch (e) {}</script>
+{% endif %}
 </head>
 <body class="bg-ink-black text-white font-sans antialiased selection:bg-ink-yellow selection:text-black">
 
 <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-4 focus:rounded focus:bg-ink-yellow focus:px-4 focus:py-2 focus:font-bold focus:text-black">Skip to content</a>
 
+{% if WHITE_SUNDAY %}{% include "main/partials/_white_sunday_bar.html" %}{% endif %}
 {% comment %}
 Transparent at the top so the bar dissolves into the hero, then solid once the
 page scrolls. It has to become opaque: further down, the nav passes over the
@@ -47,12 +52,31 @@ yellow CTA band and the white footer, where light-on-transparent would be
 unreadable. `scrolled` is also set on load so a deep link or a restored scroll
 position starts in the right state rather than flashing transparent.
 {% endcomment %}
-<header x-data="{ open: false, scrolled: window.scrollY > 40 }"
-        @scroll.window="scrolled = window.scrollY > 40"
+{% comment %}
+When the announcement bar is showing, the fixed header starts just below it
+and rides up with the page until the bar has scrolled away: top = bar height
+minus scroll, never below zero. `bar` is 0 when there is no bar or it has been
+dismissed, which leaves the header exactly where it always was.
+{% endcomment %}
+<header x-data="{
+          open: false,
+          scrolled: window.scrollY > 40,
+          y: window.scrollY,
+          bar: 0,
+          measure() {
+            const el = document.getElementById('ink-announce');
+            this.bar = el && el.offsetParent !== null ? el.offsetHeight : 0;
+          }
+        }"
+        x-init="measure()"
+        :style="bar ? 'top:' + Math.max(0, bar - y) + 'px' : ''"
+        @resize.window="measure()"
+        @announce-changed.window="measure()"
+        @scroll.window="scrolled = window.scrollY > 40; y = window.scrollY"
         :class="scrolled
           ? 'border-white/10 bg-ink-black/95 shadow-lg shadow-black/50 backdrop-blur'
           : 'border-transparent bg-transparent'"
-        class="fixed inset-x-0 top-0 z-50 border-b transition-all duration-300">
+        class="fixed inset-x-0 top-0 z-50 border-b transition-[background-color,border-color,box-shadow] duration-300">
   {% comment %}
   Three-column grid rather than a flex row: it keeps the logo optically centred
   in the bar no matter how much wider one side's links are than the other's.

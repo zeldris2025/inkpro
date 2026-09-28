@@ -207,3 +207,149 @@
   .ink-marquee__track > *:nth-child(n + 3) { display: none; }
   .ink-marquee { -webkit-mask-image: none; mask-image: none; }
 }
+
+/* --- White Sunday announcement bar ----------------------------------------
+   White is the colour of Lotu a Tamaiti, so this bar is the one light element
+   in the dark chrome: pearl white, gold hairlines, a slow sheen passing over
+   it. The track uses the same -50% loop as .ink-marquee. */
+.ink-announce {
+  --ws-gold: #b8921c;
+  --ws-gold-light: #e9d18a;
+  position: relative;
+  z-index: 60;
+  overflow: hidden;
+  color: #1c1917;
+  background: linear-gradient(100deg, #fbf8f0 0%, #ffffff 42%, #ffffff 58%, #f5efdf 100%);
+  box-shadow: inset 0 -1px 0 rgba(184, 146, 28, 0.35);
+}
+/* Gold hairline along the top edge. */
+.ink-announce::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--ws-gold) 20%, var(--ws-gold-light) 50%, var(--ws-gold) 80%, transparent);
+}
+/* A soft pearl sheen that sweeps across every few seconds. */
+.ink-announce::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent 35%, rgba(233, 209, 138, 0.35) 50%, transparent 65%);
+  transform: translateX(-100%);
+  animation: ink-announce-sheen 9s ease-in-out infinite;
+}
+.ink-announce-dismissed .ink-announce { display: none; }
+
+.ink-announce__inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 80rem;
+  margin-inline: auto;
+  padding: 0.5rem 0.75rem 0.5rem 1rem;
+}
+
+.ink-announce__label {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  background: #0a0a0a;
+  padding: 0.3rem 0.8rem 0.3rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(184, 146, 28, 0.5), 0 4px 14px -6px rgba(184, 146, 28, 0.7);
+}
+.ink-announce__date { color: var(--ws-gold-light); }
+.ink-announce__flower { width: 1.05rem; height: 1.05rem; fill: #fff; animation: ink-announce-spin 18s linear infinite; }
+.ink-announce__flower-heart { fill: #f4c430; }
+
+.ink-announce__marquee {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+}
+.ink-announce__track {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  animation: ink-marquee 46s linear infinite;
+  will-change: transform;
+}
+.ink-announce:hover .ink-announce__track,
+.ink-announce:focus-within .ink-announce__track { animation-play-state: paused; }
+
+.ink-announce__item {
+  padding-inline: 1.1rem;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #292524;
+}
+.ink-announce__item em {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--ws-gold);
+}
+.ink-announce__sep { font-size: 0.6rem; color: var(--ws-gold); }
+
+.ink-announce__cta {
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #0a0a0a;
+  padding: 0.38rem 0.95rem;
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: #fff;
+  transition: background 0.2s, color 0.2s, transform 0.2s;
+}
+.ink-announce__cta:hover { background: var(--ink-yellow); color: #000; transform: translateY(-1px); }
+
+.ink-announce__close {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  color: #78716c;
+  transition: background 0.2s, color 0.2s;
+}
+.ink-announce__close:hover { background: rgba(0, 0, 0, 0.06); color: #1c1917; }
+.ink-announce__close svg { width: 0.85rem; height: 0.85rem; }
+
+@media (max-width: 639px) {
+  /* Phones: the message carries it; the label shrinks to its flower. */
+  .ink-announce__inner { gap: 0.5rem; padding-left: 0.6rem; }
+  .ink-announce__label { padding: 0.35rem; }
+  .ink-announce__label-text { display: none; }
+  .ink-announce__cta { display: none; }
+}
+
+@keyframes ink-announce-sheen {
+  0%, 55% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+@keyframes ink-announce-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ink-announce::after, .ink-announce__flower { animation: none; }
+  .ink-announce__track { animation: none; width: 100%; justify-content: center; }
+  .ink-announce__track > *:nth-child(n + 2) { display: none; }
+  .ink-announce__item { white-space: normal; text-align: center; }
+  .ink-announce__marquee { -webkit-mask-image: none; mask-image: none; }
+}

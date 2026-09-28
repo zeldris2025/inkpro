@@ -45,6 +45,7 @@ env = environ.Env(
     MEDIA_ROOT=(str, ''),
     CONN_MAX_AGE=(int, 0),
     LAUNCH_PROMO_ENABLED=(bool, True),
+    WHITE_SUNDAY_BANNER=(bool, True),
     LAUNCH_PROMO_TEXT=(str, 'We just launched — our first 20 sales will receive a massive 50% discount'),
     CURRENCY_CODE=(str, 'WST'),
     CURRENCY_NAME=(str, 'Samoan Tala'),
@@ -237,6 +238,11 @@ CURRENCY_SYMBOL = '$'
 # the template — retiring it after the 20th sale needs no code change.
 LAUNCH_PROMO_ENABLED = env('LAUNCH_PROMO_ENABLED')
 LAUNCH_PROMO_TEXT = env('LAUNCH_PROMO_TEXT')
+
+# White Sunday announcement bar across the top of every page. It works out the
+# date itself (the second Sunday of October) and only shows in the weeks
+# leading up to it, so it needs no yearly edit; this switches it off entirely.
+WHITE_SUNDAY_BANNER = env('WHITE_SUNDAY_BANNER')
 
 # Scroll-driven WebGL layer on the homepage. Off by default; set
 # ENABLE_3D_HERO=True to bring it back. The scene, its loader and the static

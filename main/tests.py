@@ -1174,6 +1174,59 @@ class LaunchPromoMarqueeTests(TestCase):
                 self.assertNotContains(self.client.get(reverse(name)), 'ink-marquee')
 
 
+class WhiteSundayBannerTests(TestCase):
+    """The White Sunday bar across the top of every page."""
+
+    def on(self, day):
+        import datetime
+
+        return mock.patch(
+            'main.context_processors.timezone.localdate', return_value=datetime.date.fromisoformat(day)
+        )
+
+    def test_the_date_is_the_second_sunday_of_october(self):
+        import datetime
+
+        from main.context_processors import white_sunday
+
+        self.assertEqual(white_sunday(2026), datetime.date(2026, 10, 11))
+        self.assertEqual(white_sunday(2027), datetime.date(2027, 10, 10))
+        self.assertEqual(white_sunday(2028), datetime.date(2028, 10, 8))  # 1 Oct is a Sunday
+
+    def test_it_shows_on_every_page_in_the_run_up(self):
+        with self.on('2026-09-28'):
+            for name in ('home', 'services', 'about', 'contact', 'login'):
+                with self.subTest(view=name):
+                    response = self.client.get(reverse(name))
+                    self.assertContains(response, 'id="ink-announce"')
+                    self.assertContains(response, 'Sunday 11 October')
+                    self.assertContains(response, 'Order early')
+
+    def test_it_becomes_a_greeting_on_the_day_and_the_holiday_monday(self):
+        for day in ('2026-10-11', '2026-10-12'):
+            with self.subTest(day=day), self.on(day):
+                response = self.client.get(reverse('home'))
+                self.assertContains(response, 'Happy White Sunday from all of us')
+                self.assertNotContains(response, 'Order early')
+
+    def test_it_is_hidden_outside_the_season(self):
+        for day in ('2026-08-29', '2026-10-13', '2026-12-25'):
+            with self.subTest(day=day), self.on(day):
+                self.assertNotContains(self.client.get(reverse('home')), 'id="ink-announce"')
+
+    @override_settings(WHITE_SUNDAY_BANNER=False)
+    def test_it_can_be_switched_off(self):
+        with self.on('2026-09-28'):
+            self.assertNotContains(self.client.get(reverse('home')), 'id="ink-announce"')
+
+    def test_screen_readers_get_one_copy_and_it_can_be_dismissed(self):
+        with self.on('2026-09-28'):
+            response = self.client.get(reverse('home'))
+        self.assertContains(response, 'class="ink-announce__track" aria-hidden="true"')
+        self.assertContains(response, 'aria-label="Dismiss the White Sunday announcement"')
+        self.assertContains(response, "inkpro-white-sunday-2026")
+
+
 class SignedInPrefillTests(TestCase):
     """A signed-in customer should never retype their own contact details."""
 
