@@ -43,7 +43,6 @@ env = environ.Env(
     QUOTE_VALID_DAYS=(int, 30),
     ENABLE_3D_HERO=(bool, False),
     MEDIA_ROOT=(str, ''),
-    PRIVATE_MEDIA_ROOT=(str, ''),
     CONN_MAX_AGE=(int, 0),
     LAUNCH_PROMO_ENABLED=(bool, True),
     LAUNCH_PROMO_TEXT=(str, 'We just launched — our first 20 sales will receive a massive 50% discount'),
@@ -84,9 +83,6 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    # Someone signed in on a staff-issued temporary password must replace it
-    # before they can do anything else.
-    'main.middleware.ForcePasswordChangeMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -182,13 +178,6 @@ MEDIA_URL = '/media/'
 # push while its database row survived. See media.py — an explicit MEDIA_ROOT
 # still wins.
 MEDIA_ROOT = resolve_media_root(BASE_DIR, env('MEDIA_ROOT'))
-# Customer ID documents. Never under MEDIA_ROOT: everything there is served
-# publicly by MediaFilesMiddleware, and an ID must only ever be reachable
-# through the staff-only view that checks who is asking. Sits beside the media
-# directory, so on App Service it inherits the same persistent volume.
-PRIVATE_MEDIA_ROOT = Path(env('PRIVATE_MEDIA_ROOT') or Path(MEDIA_ROOT).parent / 'private')
-#: Largest ID upload accepted, in bytes.
-ID_DOCUMENT_MAX_BYTES = 8 * 1024 * 1024
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

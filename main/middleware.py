@@ -38,30 +38,3 @@ class MediaFilesMiddleware(WhiteNoiseMiddleware):
         root = getattr(settings, 'MEDIA_ROOT', None)
         if root:
             self.add_files(str(root), prefix=settings.MEDIA_URL)
-
-
-class ForcePasswordChangeMiddleware:
-    """Hold a customer on the password-change page until they pick their own.
-
-    Approval emails a temporary password. Until it is replaced, the emailed
-    copy is a working credential sitting in two mailboxes, so every page other
-    than the change form itself (and signing out) redirects there.
-    """
-
-    ALLOWED_URL_NAMES = ('password_change', 'password_change_done', 'logout')
-
-    def __init__(self, get_response):
-        self.get_response = get_response
-
-    def __call__(self, request):
-        from django.shortcuts import redirect
-        from django.urls import reverse
-
-        user = getattr(request, 'user', None)
-        customer = getattr(user, 'customer', None) if user and user.is_authenticated else None
-        if customer is not None and customer.must_change_password:
-            allowed = [reverse(name) for name in self.ALLOWED_URL_NAMES]
-            exempt = (django_settings.STATIC_URL, django_settings.MEDIA_URL)
-            if request.path not in allowed and not request.path.startswith(exempt):
-                return redirect('password_change')
-        return self.get_response(request)

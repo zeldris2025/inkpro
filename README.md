@@ -479,20 +479,6 @@ switch, with no code change. Key settings: `SECRET_KEY`, `DEBUG`,
 `ALLOWED_HOSTS`, `SITE_URL` (used to build the emailed quote links),
 `GST_RATE`, `QUOTE_VALID_DAYS`, `STAFF_NOTIFY_EMAILS`, `ENABLE_3D_HERO`.
 
-### Customer verification
-
-Only verified customers can request quotes. New customers apply at
-`/accounts/signup/` with their name, email, phone and a photo of their ID. Staff
-are emailed, check the ID under **Staff → Customers**, and approve or reject.
-Approving creates the login and emails a username and a temporary password,
-which the customer must replace the first time they sign in.
-
-ID documents are **not** stored under `MEDIA_ROOT`, because everything there is
-publicly downloadable. They go to `PRIVATE_MEDIA_ROOT`, which defaults to a
-`private/` folder beside the media folder (`/home/site/private` on App Service),
-and are only ever streamed through a staff-only view. Include that folder in
-your backups.
-
 With `DEBUG=False`, SSL redirect, secure cookies and HSTS switch on
 automatically.
 

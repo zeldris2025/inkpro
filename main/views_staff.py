@@ -4,10 +4,9 @@ import csv
 
 from django.contrib import messages
 from django.db.models import Count, Q, Sum
-from django.http import FileResponse, Http404, HttpResponse
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 
 from .forms import (
@@ -16,8 +15,7 @@ from .forms import (
     StaffQuoteItemAddForm,
     StaffQuoteItemFormSet,
 )
-from .accounts import ApplicationError, approve_application, reject_application
-from .models import CustomerApplication, Invoice, InvalidTransition, Quote
+from .models import Invoice, InvalidTransition, Quote
 from .pdf import attach_pdf_to_quote
 from .permissions import staff_required
 from .tasks import run_task, send_quote_to_customer_task
@@ -64,9 +62,6 @@ def dashboard(request):
                 + status_counts.get(Invoice.PARTIAL, 0),
             },
             'awaiting': Quote.objects.awaiting_staff().count(),
-            'pending_applications': CustomerApplication.objects.filter(
-                status=CustomerApplication.PENDING
-            ).count(),
             'recent_quotes': Quote.objects.exclude(status=Quote.DRAFT)[:8],
             'recent_payments': Invoice.objects.filter(amount_received__gt=0).order_by('-pk')[:6],
             'overdue': [i for i in Invoice.objects.exclude(payment_status=Invoice.PAID)[:50] if i.is_overdue][:6],
@@ -380,109 +375,3 @@ def invoice_inline_update(request, pk):
 
     invoice.save()
     return render(request, 'main/staff/_register_row.html', {'invoice': invoice})
-
-
-# --- customer verification --------------------------------------------------
-@staff_required
-def application_list(request):
-    """Account applications waiting for an ID check, and the decisions made."""
-    status = request.GET.get('status', CustomerApplication.PENDING)
-    if status not in dict(CustomerApplication.STATUS_CHOICES):
-        status = CustomerApplication.PENDING
-    counts = {
-        row['status']: row['n']
-        for row in CustomerApplication.objects.values('status').annotate(n=Count('id'))
-    }
-    return render(
-        request,
-        'main/staff/application_list.html',
-        {
-            'applications': CustomerApplication.objects.filter(status=status).select_related(
-                'reviewed_by'
-            )[:200],
-            'status': status,
-            'tabs': [
-                (value, label, counts.get(value, 0))
-                for value, label in CustomerApplication.STATUS_CHOICES
-            ],
-        },
-    )
-
-
-@staff_required
-def application_detail(request, pk):
-    application = get_object_or_404(
-        CustomerApplication.objects.select_related('reviewed_by', 'customer__user'), pk=pk
-    )
-    return render(
-        request,
-        'main/staff/application_detail.html',
-        {
-            'application': application,
-            # Same email or phone on another application is worth a second look.
-            'related': CustomerApplication.objects.exclude(pk=pk).filter(
-                Q(email__iexact=application.email) | Q(phone=application.phone)
-            )[:10],
-        },
-    )
-
-
-@staff_required
-@xframe_options_sameorigin
-def application_id_document(request, pk):
-    """Stream the ID to staff. The file is never reachable by a public URL."""
-    application = get_object_or_404(CustomerApplication, pk=pk)
-    if not application.id_document:
-        raise Http404('No document on file.')
-    try:
-        handle = application.id_document.open('rb')
-    except FileNotFoundError:
-        raise Http404('The document file is missing from storage.')
-    response = FileResponse(handle, content_type=_id_content_type(application.id_document.name))
-    response['Content-Disposition'] = f'inline; filename="id-{application.pk}"'
-    response['Cache-Control'] = 'private, no-store'
-    # The upload form only accepts files whose bytes are a real JPG, PNG or
-    # PDF; nosniff stops the browser second-guessing the declared type.
-    response['X-Content-Type-Options'] = 'nosniff'
-    return response
-
-
-def _id_content_type(name):
-    name = name.lower()
-    if name.endswith('.pdf'):
-        return 'application/pdf'
-    if name.endswith('.png'):
-        return 'image/png'
-    return 'image/jpeg'
-
-
-@staff_required
-@require_POST
-def application_decide(request, pk):
-    application = get_object_or_404(CustomerApplication, pk=pk)
-    decision = request.POST.get('decision')
-    try:
-        if decision == 'approve':
-            user = approve_application(application, request.user)
-            messages.success(
-                request,
-                f'{application.full_name} is verified. Sign-in details for “{user.username}” '
-                f'were emailed to {application.email}.',
-            )
-        elif decision == 'reject':
-            reject_application(application, request.user, request.POST.get('reason', ''))
-            messages.success(request, f'Application from {application.full_name} rejected and the applicant told.')
-        else:
-            messages.error(request, 'Unknown decision.')
-    except ApplicationError as exc:
-        messages.error(request, str(exc))
-    except Exception:
-        import logging
-
-        logging.getLogger(__name__).exception('Deciding application %s failed.', pk)
-        messages.error(
-            request,
-            'The email to the applicant could not be sent, so nothing was changed. '
-            'Check the email settings and try again.',
-        )
-    return redirect('staff_application_detail', pk=pk)

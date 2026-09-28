@@ -21,7 +21,6 @@ from main.graph_mail import GraphError
 from main.models import (
     CategoryImage,
     Customer,
-    CustomerApplication,
     EmailTemplate,
     Invoice,
     InvalidTransition,
@@ -31,14 +30,6 @@ from main.models import (
     ServiceCategory,
     UrgentFee,
 )
-
-
-def sign_in_verified_customer(client, username='customer', email='customer@example.com'):
-    """Only verified customers can build quotes; most wizard tests start as one."""
-    user = User.objects.create_user(username, email, 'pw')
-    Customer.objects.create(user=user, name='Test Customer', email=email, is_verified=True)
-    client.force_login(user)
-    return user
 
 
 class PricingArithmeticTests(TestCase):
@@ -287,9 +278,8 @@ class QuoteWizardFlowTests(TestCase):
         )
         UrgentFee.objects.create(min_amount=Decimal('50'), max_amount=Decimal('100'))
         self.staff = User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
-        sign_in_verified_customer(self.client)
 
-    def test_verified_customer_can_build_and_submit_a_quote(self):
+    def test_guest_can_build_and_submit_a_quote(self):
         add = self.client.post(
             reverse('quote_configure', args=['banners']),
             {'pricing_rule': self.rule.pk, 'quantity': 2},
@@ -596,7 +586,6 @@ class CustomerBriefTests(TestCase):
         self.rule = PricingRule.objects.create(
             category=category, name='2m x 1m', base_price=Decimal('280')
         )
-        sign_in_verified_customer(self.client)
 
     @override_settings(STAFF_NOTIFY_EMAILS=['inkpro@ahliki.com'])
     def test_the_brief_is_saved_and_emailed_to_the_office(self):
@@ -1198,7 +1187,7 @@ class SignedInPrefillTests(TestCase):
         )
         Customer.objects.create(
             user=self.user, name='Ada Lovelace', email='ada@example.com',
-            company_name='Analytical Engines', phone='021 555 0000', is_verified=True,
+            company_name='Analytical Engines', phone='021 555 0000',
         )
 
     def start_a_quote(self):
@@ -1224,10 +1213,8 @@ class SignedInPrefillTests(TestCase):
         self.assertContains(response, 'value="ada@example.com"')
         self.assertContains(response, 'value="Ada Lovelace"')
 
-    def test_staff_without_a_customer_record_still_get_prefilled(self):
-        bare = User.objects.create_user(
-            'bob', 'bob@example.com', 'pw', first_name='Bob', is_staff=True
-        )
+    def test_a_user_without_a_customer_record_still_gets_prefilled(self):
+        bare = User.objects.create_user('bob', 'bob@example.com', 'pw', first_name='Bob')
         self.client.force_login(bare)
         self.start_a_quote()
         form = self.client.get(reverse('quote_review')).context['form']
@@ -1254,15 +1241,21 @@ class SignedInPrefillTests(TestCase):
         form = self.client.get(reverse('quote_review')).context['form']
         self.assertEqual(form['guest_name'].value(), 'Analytical Engines')
 
+    def test_guests_still_get_an_empty_form(self):
+        self.start_a_quote()
+        form = self.client.get(reverse('quote_review')).context['form']
+        self.assertFalse(form['guest_name'].value())
+        self.assertFalse(form['guest_email'].value())
+
     def test_details_already_on_the_draft_are_not_overwritten(self):
-        # If the customer typed something already, keep what they typed.
-        self.client.force_login(self.user)
+        # If the visitor typed something before signing in, keep what they typed.
         self.start_a_quote()
         draft = Quote.objects.get(status=Quote.DRAFT)
         draft.guest_name = 'Typed By Hand'
         draft.guest_email = 'typed@example.com'
         draft.save()
 
+        self.client.force_login(self.user)
         form = self.client.get(reverse('quote_review')).context['form']
         self.assertEqual(form['guest_name'].value(), 'Typed By Hand')
         self.assertEqual(form['guest_email'].value(), 'typed@example.com')
@@ -1331,7 +1324,6 @@ class MinimumQuantityTests(TestCase):
     """
 
     def setUp(self):
-        sign_in_verified_customer(self.client)
         self.category = ServiceCategory.objects.create(
             name='Small Format Stickers', slug='small-format-stickers'
         )
@@ -1532,288 +1524,46 @@ class SignInIdentifierTests(TestCase):
         self.assertTrue(response.context['user'].is_authenticated)
 
 
-ID_JPEG = b'\xff\xd8\xff\xe0' + b'\x00' * 64
-ID_PDF = b'%PDF-1.4\n' + b'0' * 64
-
-
-class CustomerVerificationTests(TestCase):
-    """Nobody can request a quote until staff have checked their ID."""
+class SignupDuplicationTests(TestCase):
+    """Signup must not let a second account shadow an existing one."""
 
     def setUp(self):
-        import shutil
-        import tempfile
+        User.objects.create_user('Ada', 'ada@example.com', 'Corr3ctHorse!x')
 
-        self.private_root = pathlib.Path(tempfile.mkdtemp())
-        self.media_root = pathlib.Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.private_root, ignore_errors=True)
-        self.addCleanup(shutil.rmtree, self.media_root, ignore_errors=True)
-        overrides = override_settings(
-            PRIVATE_MEDIA_ROOT=self.private_root,
-            MEDIA_ROOT=self.media_root,
-            SITE_URL='https://inkprosamoa.com',
-            STAFF_NOTIFY_EMAILS=['inkpro@ahliki.com'],
-        )
-        overrides.enable()
-        self.addCleanup(overrides.disable)
-
-        self.category = ServiceCategory.objects.create(name='Banners', slug='banners')
-        self.rule = PricingRule.objects.create(
-            category=self.category, name='2m x 1m', base_price=Decimal('280')
-        )
-        self.staff = User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
-
-    def apply(self, **overrides):
-        from django.core.files.uploadedfile import SimpleUploadedFile
-
+    def post_signup(self, **overrides):
         data = {
-            'first_name': 'Sione', 'last_name': 'Tuilagi', 'email': 'Sione@Example.com',
-            'phone': '+685 7712345', 'consent': 'on', 'website': '',
-            'id_document': SimpleUploadedFile('passport.jpg', ID_JPEG, content_type='image/jpeg'),
+            'username': 'newperson', 'email': 'new@example.com',
+            'password1': 'Corr3ctHorse!x', 'password2': 'Corr3ctHorse!x',
         }
         data.update(overrides)
         return self.client.post(reverse('signup'), data)
 
-    def approved_email(self):
-        return next(m for m in mail.outbox if 'account is ready' in m.subject)
-
-    # -- the gate ----------------------------------------------------------
-    def test_anonymous_visitors_are_asked_to_sign_in_or_apply(self):
-        response = self.client.get(reverse('quote_builder'))
-        self.assertContains(response, 'Quotes are for verified customers')
-        self.assertContains(response, reverse('signup'))
-
-        self.client.post(
-            reverse('quote_configure', args=['banners']), {'pricing_rule': self.rule.pk, 'quantity': 1}
-        )
-        self.assertFalse(Quote.objects.exists())
-
-    def test_an_unverified_account_cannot_request_a_quote(self):
-        user = User.objects.create_user('someone', 'someone@example.com', 'pw')
-        Customer.objects.create(user=user, email='someone@example.com', is_verified=False)
-        self.client.force_login(user)
-        response = self.client.get(reverse('quote_builder'))
-        self.assertEqual(response.status_code, 403)
-        self.assertContains(response, 'isn’t verified yet', status_code=403)
-
-        review = self.client.post(reverse('quote_review'), {'guest_name': 'x', 'guest_email': 'x@x.com'})
-        self.assertEqual(review.status_code, 403)
-        self.assertFalse(Quote.objects.filter(status=Quote.SUBMITTED).exists())
-
-    def test_htmx_partials_are_refused_too(self):
-        response = self.client.post(reverse('quote_toggle_urgent'), HTTP_HX_REQUEST='true')
-        self.assertEqual(response.status_code, 403)
-
-    # -- applying ----------------------------------------------------------
-    def test_applying_creates_no_login_and_alerts_the_office(self):
-        response = self.apply()
-        self.assertRedirects(response, reverse('signup_done'))
-        application = CustomerApplication.objects.get()
-        self.assertEqual(application.status, CustomerApplication.PENDING)
-        self.assertEqual(application.email, 'sione@example.com')
-        self.assertFalse(User.objects.filter(email__iexact='sione@example.com').exists())
-
-        staff = next(m for m in mail.outbox if m.to == ['inkpro@ahliki.com'])
-        self.assertIn('Sione Tuilagi', staff.subject)
-        html = staff.alternatives[0][0]
-        self.assertIn(
-            f'https://inkprosamoa.com{reverse("staff_application_detail", args=[application.pk])}', html
-        )
-        self.assertFalse(staff.attachments)  # the ID never travels by email
-        self.assertTrue(any(m.to == ['sione@example.com'] for m in mail.outbox))
-
-    def test_the_id_is_stored_privately_under_a_random_name(self):
-        self.apply()
-        application = CustomerApplication.objects.get()
-        stored = pathlib.Path(application.id_document.path).resolve()
-        self.assertTrue(stored.is_file())
-        self.assertTrue(stored.is_relative_to(self.private_root.resolve()))
-        self.assertFalse(stored.is_relative_to(self.media_root.resolve()))
-        self.assertNotIn('passport', stored.name)
-        self.assertFalse(any(self.media_root.rglob('*.jpg')))
-
-    def test_a_file_that_is_not_really_an_image_is_refused(self):
-        from django.core.files.uploadedfile import SimpleUploadedFile
-
-        for upload in (
-            SimpleUploadedFile('id.jpg', b'<html><script>alert(1)</script>', content_type='image/jpeg'),
-            SimpleUploadedFile('id.exe', b'MZ' + b'\x00' * 64),
-            SimpleUploadedFile('id.pdf', ID_JPEG, content_type='application/pdf'),
-        ):
-            with self.subTest(name=upload.name):
-                response = self.apply(id_document=upload)
+    def test_a_duplicate_username_is_rejected_in_any_case(self):
+        for typed in ('Ada', 'ada', 'ADA'):
+            with self.subTest(typed=typed):
+                response = self.post_signup(username=typed)
                 self.assertEqual(response.status_code, 200)
-        self.assertFalse(CustomerApplication.objects.exists())
+                self.assertContains(response, 'already taken')
+        self.assertEqual(User.objects.filter(username__iexact='ada').count(), 1)
 
-    def test_a_pdf_id_is_accepted(self):
-        from django.core.files.uploadedfile import SimpleUploadedFile
+    def test_a_duplicate_email_is_rejected_in_any_case(self):
+        response = self.post_signup(email='ADA@EXAMPLE.COM')
+        self.assertContains(response, 'already uses that email address')
 
-        self.apply(id_document=SimpleUploadedFile('licence.pdf', ID_PDF))
-        self.assertTrue(CustomerApplication.objects.get().id_is_pdf)
-
-    def test_bots_filling_the_honeypot_are_refused(self):
-        self.apply(website='http://spam.example')
-        self.assertFalse(CustomerApplication.objects.exists())
-
-    def test_consent_is_required(self):
-        data = {'consent': ''}
-        self.apply(**data)
-        self.assertFalse(CustomerApplication.objects.exists())
-
-    def test_a_second_pending_application_for_the_same_email_is_refused(self):
-        self.apply()
-        response = self.apply(email='SIONE@example.com')
-        self.assertContains(response, 'already have an application')
-        self.assertEqual(CustomerApplication.objects.count(), 1)
-
-    def test_an_email_that_already_has_an_account_is_refused(self):
-        User.objects.create_user('existing', 'sione@example.com', 'pw')
-        response = self.apply()
+    def test_the_rejection_points_at_the_way_out(self):
+        # A dead end is what makes people create a second account.
+        response = self.post_signup(username='ada')
         self.assertContains(response, 'reset your password')
-        self.assertFalse(CustomerApplication.objects.exists())
 
-    # -- staff review ------------------------------------------------------
-    def test_only_staff_can_see_the_id(self):
-        self.apply()
-        application = CustomerApplication.objects.get()
-        url = reverse('staff_application_id', args=[application.pk])
+    def test_emails_are_stored_lowercase(self):
+        self.post_signup(username='zoe', email='Zoe@Example.COM')
+        self.assertTrue(User.objects.filter(email='zoe@example.com').exists())
 
-        self.assertNotEqual(self.client.get(url).status_code, 200)
-        sign_in_verified_customer(self.client)
-        self.assertNotEqual(self.client.get(url).status_code, 200)
-
-        self.client.force_login(self.staff)
-        response = self.client.get(url)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(b''.join(response.streaming_content), ID_JPEG)
-        self.assertEqual(response['Content-Type'], 'image/jpeg')
-        self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
-        self.assertIn('no-store', response['Cache-Control'])
-
-    def test_the_staff_panel_lists_pending_applications(self):
-        self.apply()
-        self.client.force_login(self.staff)
-        listing = self.client.get(reverse('staff_application_list'))
-        self.assertContains(listing, 'Sione Tuilagi')
-        dashboard = self.client.get(reverse('staff_dashboard'))
-        self.assertContains(dashboard, 'waiting for ID verification')
-
-    def test_approving_creates_a_verified_login_and_emails_the_details(self):
-        from django.contrib.auth import authenticate
-
-        self.apply()
-        application = CustomerApplication.objects.get()
-        mail.outbox.clear()
-        self.client.force_login(self.staff)
-        self.client.post(
-            reverse('staff_application_decide', args=[application.pk]), {'decision': 'approve'}
-        )
-
-        application.refresh_from_db()
-        self.assertEqual(application.status, CustomerApplication.APPROVED)
-        self.assertEqual(application.reviewed_by, self.staff)
-        user = User.objects.get(email='sione@example.com')
-        self.assertEqual(user.username, 'sione.tuilagi')
-        self.assertTrue(user.customer.is_verified)
-        self.assertTrue(user.customer.must_change_password)
-        self.assertEqual(user.customer.phone, '+685 7712345')
-
-        message = self.approved_email()
-        self.assertEqual(message.to, ['sione@example.com'])
-        html = message.alternatives[0][0]
-        self.assertIn('sione.tuilagi', html)
-        self.assertIn('https://inkprosamoa.com/accounts/login/', html)
-        password = re.search(r'([A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4})', html).group(1)
-        self.assertEqual(authenticate(username='sione.tuilagi', password=password), user)
-
-    def test_a_failed_email_approves_nothing(self):
-        self.apply()
-        application = CustomerApplication.objects.get()
-        self.client.force_login(self.staff)
-        with mock.patch('main.emails.send_account_approved', side_effect=OSError('smtp down')):
-            response = self.client.post(
-                reverse('staff_application_decide', args=[application.pk]),
-                {'decision': 'approve'}, follow=True,
-            )
-        self.assertContains(response, 'nothing was changed')
-        application.refresh_from_db()
-        self.assertEqual(application.status, CustomerApplication.PENDING)
-        self.assertFalse(User.objects.filter(email='sione@example.com').exists())
-
-    def test_an_application_cannot_be_approved_twice(self):
-        self.apply()
-        application = CustomerApplication.objects.get()
-        self.client.force_login(self.staff)
-        url = reverse('staff_application_decide', args=[application.pk])
-        self.client.post(url, {'decision': 'approve'})
-        self.client.post(url, {'decision': 'approve'})
-        self.assertEqual(User.objects.filter(email='sione@example.com').count(), 1)
-
-    def test_customers_cannot_approve_themselves(self):
-        self.apply()
-        application = CustomerApplication.objects.get()
-        sign_in_verified_customer(self.client)
-        self.client.post(
-            reverse('staff_application_decide', args=[application.pk]), {'decision': 'approve'}
-        )
-        application.refresh_from_db()
-        self.assertEqual(application.status, CustomerApplication.PENDING)
-
-    def test_rejecting_tells_the_applicant_why(self):
-        self.apply()
-        application = CustomerApplication.objects.get()
-        mail.outbox.clear()
-        self.client.force_login(self.staff)
-        self.client.post(
-            reverse('staff_application_decide', args=[application.pk]),
-            {'decision': 'reject', 'reason': 'The photo was too blurry to read.'},
-        )
-        application.refresh_from_db()
-        self.assertEqual(application.status, CustomerApplication.REJECTED)
-        self.assertEqual(mail.outbox[0].to, ['sione@example.com'])
-        self.assertIn('too blurry', mail.outbox[0].alternatives[0][0])
-        self.assertFalse(User.objects.filter(email='sione@example.com').exists())
-
-    # -- first sign-in -----------------------------------------------------
-    def test_the_temporary_password_must_be_replaced_before_anything_else(self):
-        self.apply()
-        application = CustomerApplication.objects.get()
-        self.client.force_login(self.staff)
-        self.client.post(
-            reverse('staff_application_decide', args=[application.pk]), {'decision': 'approve'}
-        )
-        html = self.approved_email().alternatives[0][0]
-        password = re.search(r'([A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4})', html).group(1)
-        self.client.logout()
-
-        self.client.post(reverse('login'), {'username': 'sione@example.com', 'password': password})
-        response = self.client.get(reverse('quote_builder'))
-        self.assertRedirects(response, reverse('password_change'))
-        self.assertContains(self.client.get(reverse('password_change')), 'Choose your password')
-
-        self.client.post(reverse('password_change'), {
-            'old_password': password,
-            'new_password1': 'Pal0lo-Deep-Blue!', 'new_password2': 'Pal0lo-Deep-Blue!',
-        })
-        user = User.objects.get(email='sione@example.com')
-        self.assertFalse(user.customer.must_change_password)
-        self.assertEqual(self.client.get(reverse('quote_builder')).status_code, 200)
-
-    def test_temporary_passwords_are_strong_and_unambiguous(self):
-        from main.accounts import generate_temporary_password
-
-        passwords = {generate_temporary_password() for _ in range(200)}
-        self.assertEqual(len(passwords), 200)
-        for password in passwords:
-            self.assertRegex(password, r'^[A-Za-z2-9]{4}-[A-Za-z2-9]{4}-[A-Za-z2-9]{4}$')
-            self.assertFalse(set(password) & set('0O1lI'))
-
-    def test_usernames_are_readable_and_unique(self):
-        from main.accounts import generate_username
-
-        self.assertEqual(generate_username('Sione', 'Tuilagi'), 'sione.tuilagi')
-        User.objects.create_user('sione.tuilagi')
-        self.assertEqual(generate_username('Sione', 'Tuilagi'), 'sione.tuilagi2')
-        self.assertEqual(generate_username('Mālie', "O'Brien"), 'malie.obrien')
+    def test_a_genuinely_new_account_still_works(self):
+        response = self.post_signup(username='bob', email='bob@example.com')
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(User.objects.filter(username='bob').exists())
+        self.assertTrue(Customer.objects.filter(user__username='bob').exists())
 
 
 class QuoteDocumentTests(TestCase):

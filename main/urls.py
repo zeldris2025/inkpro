@@ -35,7 +35,6 @@ urlpatterns = [
     ),
     path('accounts/logout/', auth_views.LogoutView.as_view(), name='logout'),
     path('accounts/signup/', views.signup, name='signup'),
-    path('accounts/signup/received/', views.signup_done, name='signup_done'),
     path('accounts/profile/', views.profile, name='profile'),
     # Forgotten password: request a link, confirm it was sent, set a new
     # password from the emailed link, confirm it worked.
@@ -66,7 +65,11 @@ urlpatterns = [
     # Changing a known password while signed in.
     path(
         'accounts/password-change/',
-        views.FirstLoginPasswordChangeView.as_view(),
+        auth_views.PasswordChangeView.as_view(
+            template_name='main/account/password_change.html',
+            form_class=forms.StyledPasswordChangeForm,
+            success_url=reverse_lazy('password_change_done'),
+        ),
         name='password_change',
     ),
     path(
@@ -86,10 +89,6 @@ urlpatterns = [
     path('staff/quotes/<int:pk>/add-item/', views_staff.quote_add_item, name='staff_quote_add_item'),
     path('staff/quotes/<int:pk>/transition/', views_staff.quote_transition, name='staff_quote_transition'),
     path('staff/quotes/<int:pk>/pdf/', views_staff.quote_pdf, name='staff_quote_pdf'),
-    path('staff/customers/', views_staff.application_list, name='staff_application_list'),
-    path('staff/customers/<int:pk>/', views_staff.application_detail, name='staff_application_detail'),
-    path('staff/customers/<int:pk>/id/', views_staff.application_id_document, name='staff_application_id'),
-    path('staff/customers/<int:pk>/decide/', views_staff.application_decide, name='staff_application_decide'),
     path('staff/register/', views_staff.register, name='staff_register'),
     path('staff/register/new/', views_staff.invoice_edit, name='staff_invoice_new'),
     path('staff/register/<int:pk>/', views_staff.invoice_edit, name='staff_invoice_edit'),
