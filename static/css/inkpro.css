@@ -353,3 +353,7 @@
   .ink-announce__item { white-space: normal; text-align: center; }
   .ink-announce__marquee { -webkit-mask-image: none; mask-image: none; }
 }
+
+/* Register: an empty inline email cell shows a prompt instead of nothing. */
+.ink-editable-email:empty::before { content: attr(data-placeholder); }
+.ink-editable-email:focus { outline: 1px solid rgba(255, 210, 0, 0.5); outline-offset: 2px; border-radius: 3px; color: #fff; }

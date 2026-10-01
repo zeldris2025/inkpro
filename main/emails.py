@@ -47,6 +47,11 @@ DEFAULT_COPY = {
         'intro': 'A new quote request came in from {name}.',
         'outro': '',
     },
+    EmailTemplate.STAFF_OVERDUE_DIGEST: {
+        'subject': '{count} overdue invoice(s) — ${total} outstanding',
+        'intro': 'Here’s today’s summary of unpaid invoices more than 30 days old.',
+        'outro': '',
+    },
     EmailTemplate.PAYMENT_REMINDER: {
         'subject': 'Friendly reminder: invoice {invoice_no}',
         'intro': 'Hi {name}, invoice {invoice_no} is still showing as outstanding.',
@@ -201,14 +206,42 @@ def notify_staff_quote_response(quote):
 
 
 def send_payment_reminder(invoice):
-    email = invoice.customer.contact_email if invoice.customer else ''
-    return send_branded_email(
-        to=email,
+    """Email the client about an unpaid balance, and record that we did."""
+    from django.utils import timezone
+
+    sent = send_branded_email(
+        to=invoice.contact_email,
         key=EmailTemplate.PAYMENT_REMINDER,
         template='main/email/payment_reminder.html',
         context={'invoice': invoice},
         name=invoice.client,
         invoice_no=invoice.invoice_no or '(no number)',
+    )
+    if sent:
+        invoice.reminder_sent_at = timezone.now()
+        invoice.save(update_fields=['reminder_sent_at'])
+    return sent
+
+
+def notify_staff_overdue(overdue, reminded):
+    """One summary for the office: what is overdue, and who could not be reminded."""
+    if not overdue:
+        return False
+    unreachable = [invoice for invoice in overdue if not invoice.contact_email]
+    total = sum((invoice.balance for invoice in overdue), 0)
+    return send_branded_email(
+        to=list(settings.STAFF_NOTIFY_EMAILS),
+        key=EmailTemplate.STAFF_OVERDUE_DIGEST,
+        template='main/email/staff_overdue_digest.html',
+        context={
+            'overdue': overdue,
+            'reminded': reminded,
+            'unreachable': unreachable,
+            'total': total,
+            'register_url': f"{settings.SITE_URL}{reverse('staff_register')}?overdue=1",
+        },
+        count=len(overdue),
+        total=f'{total:,.2f}',
     )
 
 

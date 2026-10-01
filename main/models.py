@@ -629,8 +629,17 @@ class Invoice(models.Model):
     payment_status = models.CharField(
         max_length=20, choices=PAYMENT_STATUS_CHOICES, default=NOT_PAID, db_index=True
     )
+    # Blank until the client actually pays: an unpaid invoice has no method,
+    # and defaulting one would put a guess into the books.
     payment_method = models.CharField(
-        max_length=30, choices=PAYMENT_METHOD_CHOICES, default=CASH_CHQ
+        max_length=30, choices=PAYMENT_METHOD_CHOICES, blank=True, default=''
+    )
+    client_email = models.EmailField(
+        blank=True,
+        help_text='Where payment reminders go when the client has no customer account.',
+    )
+    reminder_sent_at = models.DateTimeField(
+        null=True, blank=True, help_text='When the last payment reminder was emailed.'
     )
     status_is_manual = models.BooleanField(
         default=False,
@@ -669,12 +678,39 @@ class Invoice(models.Model):
             self.payment_status = self.derive_payment_status()
         super().save(*args, **kwargs)
 
+    #: Days after the invoice date before an unpaid balance counts as overdue.
+    PAYMENT_TERMS_DAYS = 30
+    #: Minimum gap between two reminders for the same invoice.
+    REMINDER_INTERVAL_DAYS = 7
+
     @property
     def is_overdue(self):
         """Unpaid for more than 30 days from the invoice date."""
         if self.payment_status in (self.PAID, self.TBC) or not self.date:
             return False
-        return (timezone.localdate() - self.date).days > 30
+        return (timezone.localdate() - self.date).days > self.PAYMENT_TERMS_DAYS
+
+    @property
+    def days_overdue(self):
+        if not self.is_overdue:
+            return 0
+        return (timezone.localdate() - self.date).days - self.PAYMENT_TERMS_DAYS
+
+    @property
+    def contact_email(self):
+        """Who a reminder goes to: the linked customer's address, else the one staff entered."""
+        if self.customer and self.customer.contact_email:
+            return self.customer.contact_email
+        return self.client_email
+
+    @property
+    def reminder_due(self):
+        """Overdue, reachable, and not reminded within the last week."""
+        if not self.is_overdue or self.balance <= 0 or not self.contact_email:
+            return False
+        if self.reminder_sent_at is None:
+            return True
+        return timezone.now() - self.reminder_sent_at >= timedelta(days=self.REMINDER_INTERVAL_DAYS)
 
 
 class EmailTemplate(models.Model):
@@ -686,6 +722,7 @@ class EmailTemplate(models.Model):
     STAFF_NEW_QUOTE = 'STAFF_NEW_QUOTE'
     STAFF_QUOTE_RESPONSE = 'STAFF_QUOTE_RESPONSE'
     PAYMENT_REMINDER = 'PAYMENT_REMINDER'
+    STAFF_OVERDUE_DIGEST = 'STAFF_OVERDUE_DIGEST'
     KEY_CHOICES = [
         (QUOTE_RECEIVED, 'Customer — quote request received'),
         (QUOTE_SENT, 'Customer — your quote is ready'),
@@ -693,6 +730,7 @@ class EmailTemplate(models.Model):
         (STAFF_NEW_QUOTE, 'Staff — new quote request'),
         (STAFF_QUOTE_RESPONSE, 'Staff — customer accepted or declined'),
         (PAYMENT_REMINDER, 'Customer — payment reminder'),
+        (STAFF_OVERDUE_DIGEST, 'Staff — daily overdue invoices summary'),
     ]
 
     key = models.CharField(max_length=40, choices=KEY_CHOICES, unique=True)

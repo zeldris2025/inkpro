@@ -12,6 +12,7 @@ from unittest import mock
 
 from django.contrib.auth.models import AnonymousUser, User
 from django.core import mail
+from django.db.models import Sum
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -749,6 +750,262 @@ class RegisterViewTests(TestCase):
         response = self.client.get(reverse('staff_register'), {'q': 'Harbour'})
         self.assertContains(response, 'Harbour Cafe')
         self.assertNotContains(response, 'Someone Else')
+
+
+#: Same shape and quirks as the real Recharge Register export — title and totals
+#: block above the header, spacer rows, "29-Aug-26" and "02-Sep-2026" dates,
+#: "$1,840.50" and "2,766.00 tala" amounts, and a Balance column that is wrong
+#: for paid rows — but invented clients.
+REGISTER_CSV = """\ufeffINKPRO PRINTING \u2014 RECHARGE RECORD BOOK,,,,,,,,,,,
+"Client invoices, receipts, payments and outstanding balances.",,,,,,,,,,,
+,,,,,,,,,,,
+TOTAL INVOICED,TOTAL RECEIVED,,OUTSTANDING,PAID INVOICES,,NOT PAID/TBC,,,,,
+"2,350.50","400.00",,"2,750.50",1,,2,,,,,
+,,,,,,,,,,,
+Date,Client,Recharge / Job Details,Qty,Invoice No., Invoice Amount ,Receipt No.,Amount Received,Balance,Payment Status,Payment Method ,Notes
+,,,,,,,,,,,
+29-Aug-26,Harbour Cafe,Menu cards x 10,10,, $100.00 ,,,100.00 tala,Not Paid,,
+,,,,,,,,,,,
+02-Sep-2026,Coast Surf Club,Pull-Up Banner 850mm x 2m,5,INV-P10025," $1,850.50 ",,,"1,850.50 tala",Not Paid,PO/On Account,
+,,,,,,,,,,,
+10-Sep-2026,Te Awa Motors ,Vehicle logos,1,INV-105512," $400.00 ",G02811,"400.00 tala","400.00 tala",Paid,Cash Chq,
+,,,,,,,,,,,
+"""
+
+
+class RegisterImportTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user('s', 's@example.com', 'pw', is_staff=True)
+
+    def parse(self, text=REGISTER_CSV):
+        from main import register_import
+
+        return register_import.parse(register_import.read_csv(text.encode('utf-8')))
+
+    def upload(self, text=REGISTER_CSV, name='register.csv'):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        return self.client.post(
+            reverse('staff_register_import'),
+            {'file': SimpleUploadedFile(name, text.encode('utf-8'), content_type='text/csv')},
+        )
+
+    def test_the_sheet_is_read_despite_its_layout(self):
+        import datetime
+
+        result = self.parse()
+        self.assertEqual(len(result.rows), 3)
+        cafe, surf, motors = result.rows
+        self.assertEqual(cafe.fields['date'], datetime.date(2026, 8, 29))
+        self.assertEqual(surf.fields['date'], datetime.date(2026, 9, 2))
+        self.assertEqual(surf.fields['invoice_amount'], Decimal('1850.50'))
+        self.assertEqual(motors.fields['amount_received'], Decimal('400.00'))
+        self.assertEqual(motors.fields['client_name'], 'Te Awa Motors')
+        self.assertEqual(surf.fields['payment_method'], Invoice.PO_ON_ACCOUNT)
+        self.assertEqual(motors.fields['payment_method'], Invoice.CASH_CHQ)
+        self.assertEqual(cafe.fields['payment_method'], '')  # unpaid: no method guessed
+
+    def test_a_wrong_balance_in_the_sheet_is_flagged_not_copied(self):
+        motors = self.parse().rows[2]
+        self.assertEqual(motors.balance, Decimal('0'))
+        self.assertTrue(any('$400.00' in w for w in motors.warnings))
+
+    def test_preview_writes_nothing_and_confirm_imports(self):
+        self.client.force_login(self.staff)
+        preview = self.upload()
+        self.assertContains(preview, 'Check before importing')
+        self.assertContains(preview, 'Coast Surf Club')
+        self.assertFalse(Invoice.objects.exists())
+
+        self.client.post(reverse('staff_register_import'), {'confirm': '1'})
+        self.assertEqual(Invoice.objects.count(), 3)
+        totals = Invoice.objects.aggregate(
+            invoiced=Sum('invoice_amount'), received=Sum('amount_received'), balance=Sum('balance')
+        )
+        self.assertEqual(totals['invoiced'], Decimal('2350.50'))
+        self.assertEqual(totals['received'], Decimal('400.00'))
+        self.assertEqual(totals['balance'], Decimal('1950.50'))
+        self.assertEqual(Invoice.objects.get(invoice_no='INV-105512').payment_status, Invoice.PAID)
+
+    def test_importing_the_same_sheet_again_adds_nothing(self):
+        from main import register_import
+
+        register_import.apply(self.parse())
+        again = self.parse()
+        self.assertEqual(again.count('unchanged'), 3)
+        register_import.apply(again)
+        self.assertEqual(Invoice.objects.count(), 3)
+
+    def test_a_payment_in_an_updated_sheet_updates_the_existing_row(self):
+        from main import register_import
+
+        register_import.apply(self.parse())
+        paid = REGISTER_CSV.replace(
+            '29-Aug-26,Harbour Cafe,Menu cards x 10,10,, $100.00 ,,,100.00 tala,Not Paid,,',
+            '29-Aug-26,Harbour Cafe,Menu cards x 10,10,, $100.00 ,R-77,100.00,0.00 tala,Paid,Cash,',
+        )
+        result = self.parse(paid)
+        self.assertEqual(result.count('update'), 1)
+        register_import.apply(result)
+        cafe = Invoice.objects.get(client_name='Harbour Cafe')
+        self.assertEqual(Invoice.objects.count(), 3)
+        self.assertEqual(cafe.payment_status, Invoice.PAID)
+        self.assertEqual(cafe.receipt_no, 'R-77')
+
+    def test_clients_with_an_account_are_linked_for_reminders(self):
+        from main import register_import
+
+        Customer.objects.create(company_name='Harbour Cafe', email='accounts@harbour.example')
+        register_import.apply(self.parse())
+        cafe = Invoice.objects.get(client_name='Harbour Cafe')
+        self.assertEqual(cafe.contact_email, 'accounts@harbour.example')
+
+    def test_an_email_column_is_used_for_reminders(self):
+        from main import register_import
+
+        with_email = REGISTER_CSV.replace('Payment Method ,Notes', 'Payment Method ,Notes,Email').replace(
+            '100.00 tala,Not Paid,,', '100.00 tala,Not Paid,,,cafe@example.com'
+        )
+        register_import.apply(self.parse(with_email))
+        self.assertEqual(Invoice.objects.get(client_name='Harbour Cafe').contact_email, 'cafe@example.com')
+
+    def test_only_csv_files_from_staff_are_accepted(self):
+        self.client.force_login(self.staff)
+        self.assertContains(self.upload(name='register.xlsx'), 'isn’t a CSV file')
+        self.assertContains(self.upload(text='a,b\n1,2\n'), 'header row')
+
+        sign_in = User.objects.create_user('c', 'c@example.com', 'pw')
+        self.client.force_login(sign_in)
+        self.assertNotEqual(self.upload().status_code, 200)
+        self.assertFalse(Invoice.objects.exists())
+
+    def test_the_export_round_trips_through_the_import(self):
+        from main import register_import
+
+        register_import.apply(self.parse())
+        self.client.force_login(self.staff)
+        exported = self.client.get(reverse('staff_register'), {'export': 'csv'}).content.decode()
+        self.assertEqual(self.parse(exported).count('unchanged'), 3)
+
+    def test_the_template_downloads(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('staff_register_import_template'))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Email', response.content.decode('utf-8-sig').splitlines()[0])
+
+
+@override_settings(STAFF_NOTIFY_EMAILS=['inkpro@ahliki.com'])
+class PaymentReminderTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user('s', 's@example.com', 'pw', is_staff=True)
+        today = timezone.localdate()
+        self.overdue = Invoice.objects.create(
+            client_name='Harbour Cafe', client_email='cafe@example.com', job_details='Menu cards',
+            invoice_amount=Decimal('100'), date=today - timezone.timedelta(days=40),
+        )
+        self.unreachable = Invoice.objects.create(
+            client_name='Coast Surf Club', job_details='Banner',
+            invoice_amount=Decimal('300'), date=today - timezone.timedelta(days=35),
+        )
+        self.recent = Invoice.objects.create(
+            client_name='Te Awa Motors', client_email='motors@example.com', job_details='Logos',
+            invoice_amount=Decimal('50'), date=today - timezone.timedelta(days=5),
+        )
+        self.paid = Invoice.objects.create(
+            client_name='Paid Up Ltd', client_email='paid@example.com', job_details='Signs',
+            invoice_amount=Decimal('80'), amount_received=Decimal('80'),
+            date=today - timezone.timedelta(days=60),
+        )
+
+    def test_overdue_clients_are_reminded_and_the_office_briefed(self):
+        from main.tasks import send_payment_reminders_task
+
+        result = send_payment_reminders_task()
+        self.assertEqual(result['reminded'], [self.overdue])
+        recipients = [m.to for m in mail.outbox]
+        self.assertIn(['cafe@example.com'], recipients)
+        self.assertNotIn(['motors@example.com'], recipients)  # not overdue yet
+        self.assertNotIn(['paid@example.com'], recipients)
+
+        digest = next(m for m in mail.outbox if m.to == ['inkpro@ahliki.com'])
+        self.assertIn('2 overdue', digest.subject)
+        html = digest.alternatives[0][0]
+        self.assertIn('Coast Surf Club', html)
+        self.assertIn('no email', html)
+        self.overdue.refresh_from_db()
+        self.assertIsNotNone(self.overdue.reminder_sent_at)
+
+    def test_a_client_is_not_reminded_twice_in_a_week(self):
+        from main.tasks import send_payment_reminders_task
+
+        send_payment_reminders_task()
+        mail.outbox.clear()
+        result = send_payment_reminders_task()
+        self.assertEqual(result['reminded'], [])
+        self.assertFalse(any(m.to == ['cafe@example.com'] for m in mail.outbox))
+
+    def test_the_command_can_be_scheduled_without_celery(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command('send_payment_reminders', '--dry-run', stdout=out)
+        self.assertIn('Would remind 1 of 2', out.getvalue())
+        self.assertIn('NO EMAIL ON FILE', out.getvalue())
+        self.assertEqual(mail.outbox, [])
+
+    def test_the_register_shows_the_alerts(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('staff_register'))
+        self.assertContains(response, '2 overdue invoices')
+        self.assertContains(response, '1 unpaid entry has no email')
+        self.assertContains(response, 'Send 1 reminder')
+        overdue = self.client.get(reverse('staff_register'), {'overdue': '1'})
+        self.assertEqual(set(overdue.context['invoices']), {self.overdue, self.unreachable})
+
+    def test_the_register_lists_unpaid_before_paid(self):
+        Invoice.objects.create(
+            client_name='Part Payer', job_details='Flags', invoice_amount=Decimal('100'),
+            amount_received=Decimal('40'), date=timezone.localdate(),
+        )
+        self.client.force_login(self.staff)
+        statuses = [i.payment_status for i in self.client.get(reverse('staff_register')).context['invoices']]
+        self.assertEqual(statuses, sorted(statuses, key=[
+            Invoice.NOT_PAID, Invoice.PARTIAL, Invoice.TBC, Invoice.PAID
+        ].index))
+        self.assertEqual(statuses[-1], Invoice.PAID)
+
+    def test_reminders_can_be_sent_from_the_register(self):
+        self.client.force_login(self.staff)
+        self.client.post(reverse('staff_invoice_remind', args=[self.overdue.pk]))
+        self.assertEqual(mail.outbox[0].to, ['cafe@example.com'])
+        mail.outbox.clear()
+        self.client.post(reverse('staff_invoice_remind', args=[self.paid.pk]))
+        self.assertEqual(mail.outbox, [])
+
+    def test_an_email_typed_once_reaches_all_of_that_clients_rows(self):
+        other_job = Invoice.objects.create(
+            client_name='Coast Surf Club', job_details='Flags', invoice_amount=Decimal('20')
+        )
+        self.client.force_login(self.staff)
+        self.client.post(
+            reverse('staff_invoice_inline', args=[self.unreachable.pk]),
+            {'field': 'client_email', 'value': 'Club@Example.com'},
+        )
+        other_job.refresh_from_db()
+        self.assertEqual(other_job.contact_email, 'club@example.com')
+        bad = self.client.post(
+            reverse('staff_invoice_inline', args=[self.unreachable.pk]),
+            {'field': 'client_email', 'value': 'not-an-email'},
+        )
+        self.assertEqual(bad.status_code, 400)
+
+    def test_a_customer_account_email_wins(self):
+        user = User.objects.create_user('cafe', 'owner@cafe.example', 'pw')
+        self.overdue.customer = Customer.objects.create(user=user)
+        self.overdue.save()
+        self.assertEqual(self.overdue.contact_email, 'owner@cafe.example')
 
 
 class EmailTemplateTests(TestCase):

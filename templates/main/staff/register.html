@@ -7,10 +7,57 @@
     <p class="mt-1 text-sm text-white/45">{{ count|intcomma }} entr{{ count|pluralize:"y,ies" }}. Click any highlighted cell to edit it in place.</p>
   </div>
   <div class="flex flex-wrap gap-3">
-    <a href="?{% if search %}q={{ search }}&{% endif %}{% if status %}status={{ status }}&{% endif %}{% if method %}method={{ method }}&{% endif %}export=csv" class="ink-btn-ghost">Export CSV</a>
+    <a href="{% url 'staff_register_import' %}" class="ink-btn-ghost">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+      Import CSV
+    </a>
+    <a href="?{% if search %}q={{ search|urlencode }}&{% endif %}{% if status %}status={{ status }}&{% endif %}{% if method %}method={{ method }}&{% endif %}{% if overdue_only %}overdue=1&{% endif %}{% if no_email_only %}no_email=1&{% endif %}export=csv" class="ink-btn-ghost">Export CSV</a>
     <a href="{% url 'staff_invoice_new' %}" class="ink-btn">New entry</a>
   </div>
 </div>
+
+{# Alerts: what needs chasing, and what can't be chased automatically. #}
+{% if alerts.overdue_count or alerts.no_email_count %}
+<div class="mt-6 grid gap-3 lg:grid-cols-2">
+  {% if alerts.overdue_count %}
+  <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-400/30 bg-red-500/10 px-5 py-4">
+    <div class="flex items-center gap-3">
+      <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-500/25 text-red-200">
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+      </span>
+      <div>
+        <p class="font-bold text-red-100">{{ alerts.overdue_count }} overdue invoice{{ alerts.overdue_count|pluralize }} · ${{ alerts.overdue_total|floatformat:2|intcomma }}</p>
+        <p class="text-xs text-red-200/70">Unpaid for more than 30 days. {% if alerts.reminders_due %}{{ alerts.reminders_due }} can be reminded now.{% else %}None are due a reminder right now.{% endif %}</p>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <a href="?overdue=1" class="rounded-full border border-red-300/30 px-3.5 py-1.5 text-xs font-bold text-red-100 transition hover:bg-red-500/15">View</a>
+      {% if alerts.reminders_due %}
+      <form method="post" action="{% url 'staff_register_reminders' %}"
+            onsubmit="return confirm('Email a payment reminder to {{ alerts.reminders_due }} client{{ alerts.reminders_due|pluralize }} now?')">
+        {% csrf_token %}
+        <button type="submit" class="rounded-full bg-red-400 px-3.5 py-1.5 text-xs font-bold text-black transition hover:bg-red-300">✉ Send {{ alerts.reminders_due }} reminder{{ alerts.reminders_due|pluralize }}</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% if alerts.no_email_count %}
+  <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-yellow/30 bg-ink-yellow/5 px-5 py-4">
+    <div class="flex items-center gap-3">
+      <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink-yellow/15 text-ink-yellow">
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+      </span>
+      <div>
+        <p class="font-bold">{{ alerts.no_email_count }} unpaid entr{{ alerts.no_email_count|pluralize:"y has,ies have" }} no email</p>
+        <p class="text-xs text-white/50">Reminders can’t reach them. Click “+ add email” under the client’s name.</p>
+      </div>
+    </div>
+    <a href="?no_email=1" class="rounded-full border border-ink-yellow/40 px-3.5 py-1.5 text-xs font-bold text-ink-yellow transition hover:bg-ink-yellow/10">Show them</a>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="mt-6 grid gap-4 sm:grid-cols-3">
   <div class="rounded-xl border border-white/10 bg-white/5 p-5">
@@ -38,8 +85,12 @@
     <option value="">All methods</option>
     {% for value, label in methods %}<option value="{{ value }}" {% if method == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
   </select>
+  <label class="inline-flex items-center gap-2 rounded-lg border border-white/15 px-3.5 py-2.5 text-sm text-white/70">
+    <input type="checkbox" name="overdue" value="1" {% if overdue_only %}checked{% endif %} class="h-4 w-4 accent-ink-yellow"> Overdue only
+  </label>
+  {% if no_email_only %}<input type="hidden" name="no_email" value="1">{% endif %}
   <button type="submit" class="ink-btn">Filter</button>
-  {% if search or status or method %}<a href="{% url 'staff_register' %}" class="ink-btn-ghost">Clear</a>{% endif %}
+  {% if search or status or method or overdue_only or no_email_only %}<a href="{% url 'staff_register' %}" class="ink-btn-ghost">Clear</a>{% endif %}
 </form>
 
 <div class="mt-6 overflow-x-auto rounded-xl border border-white/10">
@@ -50,7 +101,8 @@
     <tbody class="divide-y divide-white/5">
       {% for invoice in invoices %}{% include "main/staff/_register_row.html" %}{% empty %}
       <tr><td colspan="13" class="px-4 py-14 text-center text-white/40">
-        No entries yet. Import the spreadsheet with <code class="rounded bg-white/10 px-2 py-0.5 text-xs">manage.py import_register &lt;file.xlsx&gt;</code> or add one manually.
+        {% if search or status or method or overdue_only or no_email_only %}No entries match those filters.
+        {% else %}No entries yet. <a href="{% url 'staff_register_import' %}" class="font-bold text-ink-yellow underline underline-offset-4">Import your spreadsheet</a> or add one manually.{% endif %}
       </td></tr>{% endfor %}
     </tbody>
   </table>

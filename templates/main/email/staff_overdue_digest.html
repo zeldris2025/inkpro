@@ -1,0 +1,50 @@
+{% extends "main/email/base_email.html" %}{% load humanize %}
+{% block email_body %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:18px 0 22px;">
+  <tr>
+    <td width="33%" style="padding:14px;background:#fdf2f8;border-radius:10px;text-align:center;">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#be185d;">Overdue</div>
+      <div style="margin-top:4px;font-size:22px;font-weight:900;color:#18181b;">{{ overdue|length }}</div>
+    </td>
+    <td width="8"></td>
+    <td width="33%" style="padding:14px;background:#fafafa;border-radius:10px;text-align:center;">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#71717a;">Outstanding</div>
+      <div style="margin-top:4px;font-size:22px;font-weight:900;color:#EC008C;">${{ total|floatformat:2|intcomma }}</div>
+    </td>
+    <td width="8"></td>
+    <td width="33%" style="padding:14px;background:#f0fdf4;border-radius:10px;text-align:center;">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#15803d;">Reminded today</div>
+      <div style="margin-top:4px;font-size:22px;font-weight:900;color:#18181b;">{{ reminded|length }}</div>
+    </td>
+  </tr>
+</table>
+
+{% if unreachable %}
+<p style="margin:0 0 8px;padding:12px 14px;background:#fffbe6;border-left:3px solid #FFD200;font-size:14px;color:#3f3f46;">
+  <strong>{{ unreachable|length }} client{{ unreachable|pluralize }} can’t be reminded automatically</strong> — no email on file. Add one in the register, or follow up by phone.
+</p>
+{% endif %}
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e4e4e7;border-radius:10px;margin:14px 0 0;font-size:13px;">
+  <tr style="background:#fafafa;">
+    <td style="padding:10px 14px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#71717a;">Client</td>
+    <td style="padding:10px 14px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#71717a;">Overdue</td>
+    <td align="right" style="padding:10px 14px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#71717a;">Balance</td>
+  </tr>
+  {% for invoice in overdue %}
+  <tr>
+    <td style="padding:10px 14px;border-top:1px solid #f4f4f5;color:#18181b;">
+      <strong>{{ invoice.client }}</strong>
+      <div style="color:#a1a1aa;font-size:12px;">{{ invoice.invoice_no|default:"No invoice no." }} · {{ invoice.date|date:"j M" }}
+        {% if invoice in reminded %}· <span style="color:#16a34a;">reminded</span>{% elif not invoice.contact_email %}· <span style="color:#b45309;">no email</span>{% endif %}</div>
+    </td>
+    <td style="padding:10px 14px;border-top:1px solid #f4f4f5;color:#52525b;white-space:nowrap;">{{ invoice.days_overdue }} day{{ invoice.days_overdue|pluralize }}</td>
+    <td align="right" style="padding:10px 14px;border-top:1px solid #f4f4f5;font-weight:800;color:#18181b;white-space:nowrap;">${{ invoice.balance|floatformat:2|intcomma }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<p style="text-align:center;margin:24px 0 0;">
+  <a href="{{ register_url }}" style="display:inline-block;background:#0A0A0A;color:#FFD200;font-weight:800;font-size:15px;text-decoration:none;padding:14px 32px;border-radius:999px;">Open the register →</a>
+</p>
+{% endblock %}

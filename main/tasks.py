@@ -92,19 +92,39 @@ def build_quote_pdf_task(quote_id):
 
 
 @_task
-def send_payment_reminders_task():
-    """Periodic task: nudge every overdue invoice that has a contactable customer."""
-    from .emails import send_payment_reminder
+def send_payment_reminders_task(dry_run=False):
+    """Daily: remind every overdue client we can reach, then brief the office.
+
+    A client is reminded at most once a week per invoice (Invoice.reminder_due).
+    The office summary lists everything overdue, including invoices with no
+    email on file, which no automatic reminder can reach.
+    """
+    from .emails import notify_staff_overdue, send_payment_reminder
     from .models import Invoice
 
-    overdue = (
-        Invoice.objects.exclude(payment_status__in=[Invoice.PAID, Invoice.TBC])
-        .filter(customer__isnull=False)
-        .select_related('customer')
-    )
-    sent = 0
+    overdue = [
+        invoice
+        for invoice in Invoice.objects.exclude(payment_status__in=[Invoice.PAID, Invoice.TBC])
+        .filter(balance__gt=0)
+        .select_related('customer__user')
+        if invoice.is_overdue
+    ]
+    reminded = []
     for invoice in overdue:
-        if invoice.is_overdue and send_payment_reminder(invoice):
-            sent += 1
-    logger.info('Sent %s payment reminders.', sent)
-    return sent
+        if not invoice.reminder_due:
+            continue
+        if dry_run:
+            reminded.append(invoice)
+            continue
+        try:
+            if send_payment_reminder(invoice):
+                reminded.append(invoice)
+        except Exception:
+            logger.exception('Payment reminder for invoice %s failed.', invoice.pk)
+    if not dry_run:
+        try:
+            notify_staff_overdue(overdue, reminded)
+        except Exception:
+            logger.exception('Overdue summary to staff failed.')
+    logger.info('Sent %s payment reminders; %s invoices overdue.', len(reminded), len(overdue))
+    return {'overdue': overdue, 'reminded': reminded}

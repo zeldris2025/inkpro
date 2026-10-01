@@ -216,6 +216,12 @@ EMAIL_TEMPLATES = [
         '',
     ),
     (
+        EmailTemplate.STAFF_OVERDUE_DIGEST,
+        '{count} overdue invoice(s) — ${total} outstanding',
+        'Here’s today’s summary of unpaid invoices more than 30 days old.',
+        '',
+    ),
+    (
         EmailTemplate.PAYMENT_REMINDER,
         'Friendly reminder: invoice {invoice_no}',
         'Hi {name}, our records show invoice {invoice_no} is still outstanding.',

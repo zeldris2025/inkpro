@@ -6,9 +6,24 @@ with the recalculated balance and status.
 {% endcomment %}
 <tr id="invoice-row-{{ invoice.pk }}" class="transition hover:bg-white/5 {% if invoice.is_overdue %}bg-red-500/5{% endif %}">
   <td class="whitespace-nowrap px-3 py-2.5 text-white/60">{{ invoice.date|date:"j M y"|default:"—" }}</td>
-  <td class="px-3 py-2.5 font-semibold">
-    {{ invoice.client }}
-    {% if invoice.is_overdue %}<span class="ml-2 rounded bg-red-500/25 px-1.5 py-0.5 text-[10px] font-bold uppercase text-red-300">Overdue</span>{% endif %}
+  <td class="px-3 py-2.5">
+    <div class="font-semibold">
+      {{ invoice.client }}
+      {% if invoice.is_overdue %}<span class="ml-1.5 whitespace-nowrap rounded bg-red-500/25 px-1.5 py-0.5 text-[10px] font-bold uppercase text-red-300" title="Unpaid for more than {{ invoice.PAYMENT_TERMS_DAYS }} days">Overdue {{ invoice.days_overdue }}d</span>{% endif %}
+    </div>
+    {% if invoice.customer and invoice.customer.contact_email %}
+    <div class="mt-0.5 text-xs text-white/40" title="From {{ invoice.client }}'s customer account">✉ {{ invoice.customer.contact_email }}</div>
+    {% else %}
+    {# Typed once, copied to this client's other rows that have no address. #}
+    <div class="ink-editable-email mt-0.5 text-xs {% if invoice.client_email %}text-white/40{% else %}text-ink-yellow/70{% endif %}"
+         contenteditable="true" spellcheck="false"
+         data-placeholder="+ add email" title="Where payment reminders for this client are sent"
+         hx-post="{% url 'staff_invoice_inline' invoice.pk %}" hx-trigger="blur"
+         hx-vals='js:{field: "client_email", value: event.target.innerText.trim()}'
+         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+         hx-target="#invoice-row-{{ invoice.pk }}" hx-swap="outerHTML"
+         >{{ invoice.client_email }}</div>
+    {% endif %}
   </td>
   <td class="max-w-xs px-3 py-2.5 text-white/60"
       contenteditable="true"
@@ -54,9 +69,21 @@ with the recalculated balance and status.
       {% elif invoice.payment_status == 'TBC' %}bg-white/10 text-white/50
       {% else %}bg-red-500/20 text-red-300{% endif %}">{{ invoice.get_payment_status_display }}</span>
   </td>
-  <td class="whitespace-nowrap px-3 py-2.5 text-xs text-white/50">{{ invoice.get_payment_method_display }}</td>
+  <td class="whitespace-nowrap px-3 py-2.5 text-xs text-white/50">{{ invoice.get_payment_method_display|default:"—" }}</td>
   <td class="max-w-[180px] truncate px-3 py-2.5 text-xs text-white/40">{{ invoice.notes }}</td>
   <td class="whitespace-nowrap px-3 py-2.5 text-right">
-    <a href="{% url 'staff_invoice_edit' invoice.pk %}" class="text-xs font-bold text-ink-yellow hover:underline">Edit</a>
+    <div class="flex items-center justify-end gap-3">
+      {% if invoice.balance > 0 and invoice.payment_status != 'PAID' and invoice.payment_status != 'TBC' and invoice.contact_email %}
+      <form method="post" action="{% url 'staff_invoice_remind' invoice.pk %}"
+            onsubmit="return confirm('Email a payment reminder for ${{ invoice.balance|floatformat:2 }} to {{ invoice.contact_email|escapejs }}?')">
+        {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button type="submit" class="rounded-full border border-white/15 px-2.5 py-1 text-[11px] font-bold transition hover:border-ink-yellow hover:text-ink-yellow"
+                title="{% if invoice.reminder_sent_at %}Last reminded {{ invoice.reminder_sent_at|date:'j M Y, g:ia' }}{% else %}Not reminded yet{% endif %}">
+          ✉ Remind{% if invoice.reminder_sent_at %} <span class="font-normal text-white/40">· {{ invoice.reminder_sent_at|date:"j M" }}</span>{% endif %}
+        </button>
+      </form>
+      {% endif %}
+      <a href="{% url 'staff_invoice_edit' invoice.pk %}" class="text-xs font-bold text-ink-yellow hover:underline">Edit</a>
+    </div>
   </td>
 </tr>

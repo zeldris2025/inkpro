@@ -1,9 +1,11 @@
 """Staff portal: quote review inbox, the approve-and-send flow and the register."""
 
 import csv
+import io
+from datetime import timedelta
 
 from django.contrib import messages
-from django.db.models import Count, Q, Sum
+from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -259,13 +261,26 @@ def quote_pdf(request, pk):
 
 
 # --- finance register -------------------------------------------------------
+#: Register order, top to bottom: what still needs chasing comes first.
+PAYMENT_ORDER = [Invoice.NOT_PAID, Invoice.PARTIAL, Invoice.TBC, Invoice.PAID]
+
+
 @staff_required
 def register(request):
     """The Recharge Register: search, filter, inline edit and export."""
-    invoices = Invoice.objects.select_related('customer', 'quote')
+    # Money still owed first, settled last; newest first within each group.
+    invoices = Invoice.objects.select_related('customer', 'quote').annotate(
+        payment_rank=Case(
+            *[When(payment_status=status, then=Value(rank)) for rank, status in enumerate(PAYMENT_ORDER)],
+            default=Value(len(PAYMENT_ORDER)),
+            output_field=IntegerField(),
+        )
+    ).order_by('payment_rank', '-date', '-pk')
     search = request.GET.get('q', '').strip()
     status = request.GET.get('status', '')
     method = request.GET.get('method', '')
+    overdue_only = request.GET.get('overdue') == '1'
+    no_email_only = request.GET.get('no_email') == '1'
 
     if search:
         invoices = invoices.filter(
@@ -279,6 +294,10 @@ def register(request):
         invoices = invoices.filter(payment_status=status)
     if method:
         invoices = invoices.filter(payment_method=method)
+    if overdue_only:
+        invoices = invoices.filter(_overdue_q())
+    if no_email_only:
+        invoices = invoices.filter(_unpaid_q()).filter(_no_email_q())
 
     if request.GET.get('export') == 'csv':
         return _export_csv(invoices)
@@ -299,8 +318,41 @@ def register(request):
             'methods': Invoice.PAYMENT_METHOD_CHOICES,
             'columns': REGISTER_COLUMNS,
             'count': invoices.count(),
+            'overdue_only': overdue_only,
+            'no_email_only': no_email_only,
+            'alerts': _register_alerts(),
         },
     )
+
+
+def _unpaid_q():
+    return ~Q(payment_status__in=[Invoice.PAID, Invoice.TBC]) & Q(balance__gt=0)
+
+
+def _overdue_q():
+    """Database form of Invoice.is_overdue, for filtering and counting."""
+    cutoff = timezone.localdate() - timedelta(days=Invoice.PAYMENT_TERMS_DAYS)
+    return _unpaid_q() & Q(date__lt=cutoff)
+
+
+def _no_email_q():
+    """Database form of "Invoice.contact_email is empty"."""
+    customer_has_none = Q(customer__email='') & (
+        Q(customer__user__isnull=True) | Q(customer__user__email='')
+    )
+    return Q(client_email='') & (Q(customer__isnull=True) | customer_has_none)
+
+
+def _register_alerts():
+    """The figures behind the alert strip at the top of the register."""
+    overdue = Invoice.objects.filter(_overdue_q()).select_related('customer__user')
+    overdue_list = list(overdue)
+    return {
+        'overdue_count': len(overdue_list),
+        'overdue_total': sum((i.balance for i in overdue_list), 0),
+        'reminders_due': sum(1 for i in overdue_list if i.reminder_due),
+        'no_email_count': Invoice.objects.filter(_unpaid_q()).filter(_no_email_q()).count(),
+    }
 
 
 def _export_csv(invoices):
@@ -308,7 +360,8 @@ def _export_csv(invoices):
     stamp = timezone.localdate().isoformat()
     response['Content-Disposition'] = f'attachment; filename="inkpro-register-{stamp}.csv"'
     writer = csv.writer(response)
-    writer.writerow([label for _, label in REGISTER_COLUMNS])
+    # Email is last so the file round-trips through "Import CSV" losslessly.
+    writer.writerow([label for _, label in REGISTER_COLUMNS] + ['Email'])
     for invoice in invoices:
         writer.writerow(
             [
@@ -324,6 +377,7 @@ def _export_csv(invoices):
                 invoice.get_payment_status_display(),
                 invoice.get_payment_method_display(),
                 invoice.notes,
+                invoice.contact_email,
             ]
         )
     return response
@@ -349,6 +403,8 @@ def invoice_inline_update(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk)
     field = request.POST.get('field')
     value = request.POST.get('value', '')
+    if field == 'client_email':
+        return _update_client_email(request, invoice, value.strip())
     editable = {
         'amount_received',
         'invoice_amount',
@@ -375,3 +431,160 @@ def invoice_inline_update(request, pk):
 
     invoice.save()
     return render(request, 'main/staff/_register_row.html', {'invoice': invoice})
+
+
+def _update_client_email(request, invoice, email):
+    """Set where reminders go for this client — on every unpaid row of theirs.
+
+    Clients appear on many rows (one per job), so an address typed once is
+    copied to their other entries that have none, rather than having to be
+    typed into each.
+    """
+    from django.core.exceptions import ValidationError
+    from django.core.validators import validate_email
+
+    if email:
+        try:
+            validate_email(email)
+        except ValidationError:
+            return HttpResponse('That isn\u2019t a valid email address.', status=400)
+    invoice.client_email = email.lower()
+    invoice.save(update_fields=['client_email'])
+    if email and invoice.client_name:
+        Invoice.objects.filter(
+            client_name__iexact=invoice.client_name, client_email=''
+        ).update(client_email=email.lower())
+    return render(request, 'main/staff/_register_row.html', {'invoice': invoice})
+
+
+@staff_required
+@require_POST
+def invoice_send_reminder(request, pk):
+    """Send one payment reminder now, from the register row."""
+    from .emails import send_payment_reminder
+
+    invoice = get_object_or_404(Invoice.objects.select_related('customer__user'), pk=pk)
+    if invoice.balance <= 0 or invoice.payment_status in (Invoice.PAID, Invoice.TBC):
+        messages.error(request, 'There is nothing outstanding on that entry.')
+    elif not invoice.contact_email:
+        messages.error(request, f'Add an email for {invoice.client} first.')
+    else:
+        try:
+            send_payment_reminder(invoice)
+        except Exception:
+            messages.error(request, 'The reminder could not be sent. Check the email settings.')
+        else:
+            messages.success(
+                request, f'Reminder for ${invoice.balance:,.2f} sent to {invoice.contact_email}.'
+            )
+    return redirect(request.POST.get('next') or 'staff_register')
+
+
+@staff_required
+@require_POST
+def register_send_reminders(request):
+    """Run the daily reminder pass now: every overdue client due a reminder."""
+    from .tasks import send_payment_reminders_task
+
+    result = send_payment_reminders_task()
+    reminded, overdue = len(result['reminded']), len(result['overdue'])
+    if reminded:
+        messages.success(
+            request,
+            f'Sent {reminded} reminder{"s" if reminded != 1 else ""}. '
+            'The office has been emailed the overdue summary.',
+        )
+    else:
+        messages.info(
+            request,
+            f'No reminders were due — {overdue} overdue, but each was either reminded in the '
+            'last week or has no email on file.' if overdue else 'Nothing is overdue.',
+        )
+    return redirect('staff_register')
+
+
+#: Session key holding an uploaded CSV between the preview and the confirm step.
+IMPORT_SESSION_KEY = 'register_import_csv'
+
+
+@staff_required
+def register_import(request):
+    """Upload a CSV of the register, preview what will change, then confirm.
+
+    The file is parsed twice: once to preview, and again on confirm, from the
+    copy kept in the session, so nothing is written until staff have seen the
+    preview and the result reflects the register as it is at that moment.
+    """
+    from . import register_import as importer
+
+    if request.method == 'POST' and 'confirm' in request.POST:
+        stored = request.session.get(IMPORT_SESSION_KEY)
+        if not stored:
+            messages.error(request, 'That import has expired — please upload the file again.')
+            return redirect('staff_register_import')
+        result = importer.parse(importer.read_csv(stored['data'].encode('utf-8')))
+        counts = importer.apply(result)
+        request.session.pop(IMPORT_SESSION_KEY, None)
+        messages.success(
+            request,
+            f'Imported {stored["name"]}: {counts["created"]} new, {counts["updated"]} updated, '
+            f'{counts["unchanged"]} already up to date.',
+        )
+        return redirect('staff_register')
+
+    context = {'max_mb': importer.MAX_UPLOAD_BYTES // (1024 * 1024)}
+    if request.method == 'POST':
+        upload = request.FILES.get('file')
+        if not upload:
+            context['error'] = 'Choose a CSV file to import.'
+        elif not upload.name.lower().endswith('.csv'):
+            context['error'] = (
+                'That isn\u2019t a CSV file. In Excel use File \u2192 Save As \u2192 '
+                'CSV UTF-8, then upload that.'
+            )
+        else:
+            try:
+                rows = importer.read_csv(upload.read())
+                result = importer.parse(rows)
+            except importer.RegisterImportError as exc:
+                context['error'] = str(exc)
+            else:
+                # Stored as text: the session serialiser only takes JSON types.
+                request.session[IMPORT_SESSION_KEY] = {
+                    'name': upload.name,
+                    'data': '\n'.join(_csv_line(row) for row in rows),
+                }
+                context.update({
+                    'result': result,
+                    'filename': upload.name,
+                    'new_count': result.count('create'),
+                    'updated_count': result.count('update'),
+                    'unchanged_count': result.count('unchanged'),
+                    'totals': {
+                        'invoiced': sum((r.fields['invoice_amount'] for r in result.rows), 0),
+                        'received': sum((r.fields['amount_received'] for r in result.rows), 0),
+                        'balance': sum((r.balance for r in result.rows), 0),
+                    },
+                })
+    return render(request, 'main/staff/register_import.html', context)
+
+
+def _csv_line(row):
+    buffer = io.StringIO()
+    csv.writer(buffer).writerow(['' if cell is None else cell for cell in row])
+    return buffer.getvalue().rstrip('\r\n')
+
+
+@staff_required
+def register_import_template(request):
+    """A blank CSV with the register's columns, for preparing future imports."""
+    response = HttpResponse(content_type='text/csv; charset=utf-8')
+    response['Content-Disposition'] = 'attachment; filename="inkpro-register-template.csv"'
+    response.write('\ufeff')  # BOM, so Excel opens it as UTF-8
+    writer = csv.writer(response)
+    writer.writerow([label for _, label in REGISTER_COLUMNS[:8]] + ['Payment Method', 'Email', 'Notes'])
+    writer.writerow([
+        timezone.localdate().strftime('%d-%b-%Y'), 'Example Client Ltd', 'Pull-up banner 850mm x 2m',
+        1, 'INV-1001', '450.00', '', '0.00', 'Bank transfer', 'accounts@example.com', '',
+    ])
+    return response
