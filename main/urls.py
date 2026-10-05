@@ -85,6 +85,7 @@ urlpatterns = [
     # Staff portal
     path('staff/', views_staff.dashboard, name='staff_dashboard'),
     path('staff/quotes/', views_staff.quote_inbox, name='staff_quote_inbox'),
+    path('staff/quotes/new/', views_staff.quote_new, name='staff_quote_new'),
     path('staff/quotes/<int:pk>/', views_staff.quote_detail, name='staff_quote_detail'),
     path('staff/quotes/<int:pk>/add-item/', views_staff.quote_add_item, name='staff_quote_add_item'),
     path('staff/quotes/<int:pk>/transition/', views_staff.quote_transition, name='staff_quote_transition'),

@@ -5,6 +5,7 @@ import io
 from datetime import timedelta
 
 from django.contrib import messages
+from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -13,11 +14,13 @@ from django.views.decorators.http import require_POST
 
 from .forms import (
     InvoiceForm,
+    StaffManualLineFormSet,
+    StaffManualQuoteForm,
     StaffQuoteForm,
     StaffQuoteItemAddForm,
     StaffQuoteItemFormSet,
 )
-from .models import Invoice, InvalidTransition, Quote
+from .models import Invoice, InvalidTransition, Quote, QuoteItem, ServiceCategory
 from .pdf import attach_pdf_to_quote
 from .permissions import staff_required
 from .tasks import run_task, send_quote_to_customer_task
@@ -176,6 +179,57 @@ def quote_detail(request, pk):
 
 
 @staff_required
+def quote_new(request):
+    """Write a quote by hand — for jobs taken in person, by phone or by email.
+
+    The quote lands in review rather than going straight out, so staff get the
+    usual Preview PDF / Approve & send screen to check it first.
+    """
+    form = StaffManualQuoteForm(request.POST or None)
+    formset = StaffManualLineFormSet(
+        request.POST or None, queryset=QuoteItem.objects.none(), prefix='lines'
+    )
+    if request.method == 'POST':
+        if form.is_valid() and formset.is_valid():
+            with transaction.atomic():
+                quote = form.save(commit=False)
+                quote.status = Quote.SUBMITTED
+                quote.submitted_at = timezone.now()
+                quote.save()
+                custom = None
+                for order, item in enumerate(formset.save(commit=False)):
+                    if item.category_id is None:
+                        custom = custom or _custom_work_category()
+                        item.category = custom
+                    item.quote = quote
+                    item.added_by_staff = True
+                    item.display_order = order
+                    item.save()
+                quote.recalculate()
+                quote.transition_to(Quote.IN_REVIEW, user=request.user)
+            messages.success(
+                request, f'Quote {quote.quote_number} created. Preview the PDF, then approve and send.'
+            )
+            return redirect('staff_quote_detail', pk=quote.pk)
+        messages.error(request, 'Please fix the highlighted fields.')
+
+    return render(
+        request, 'main/staff/quote_new.html', {'form': form, 'formset': formset}
+    )
+
+
+def _custom_work_category():
+    """Category for hand-written lines that fit no catalogue service.
+
+    Inactive, so it never appears on the public site or in the wizard.
+    """
+    category, _ = ServiceCategory.objects.get_or_create(
+        slug='custom-work', defaults={'name': 'Custom work', 'is_active': False}
+    )
+    return category
+
+
+@staff_required
 @require_POST
 def quote_add_item(request, pk):
     quote = get_object_or_404(Quote, pk=pk)
@@ -250,13 +304,14 @@ def _approve_and_send(request, quote):
 
 @staff_required
 def quote_pdf(request, pk):
-    """Stream the quote document for a staff preview before sending."""
+    """Stream the quote document: inline to preview, or ``?download=1`` to save it."""
     from .pdf import render_quote_pdf
 
     quote = get_object_or_404(Quote, pk=pk)
     filename, content, mimetype = render_quote_pdf(quote, request=request)
     response = HttpResponse(content, content_type=mimetype)
-    response['Content-Disposition'] = f'inline; filename="{filename}"'
+    disposition = 'attachment' if request.GET.get('download') else 'inline'
+    response['Content-Disposition'] = f'{disposition}; filename="{filename}"'
     return response
 
 

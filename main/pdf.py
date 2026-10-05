@@ -1,13 +1,17 @@
 """Branded quote PDF generation.
 
-WeasyPrint is the renderer, but it depends on native cairo/pango libraries that
-are not always present on a given host. When it cannot be imported the quote
-still goes out — the customer gets the same branded document as an HTML
-attachment, and the emailed "view online" link is unaffected.
+WeasyPrint is the preferred renderer, but it depends on native cairo/pango
+libraries that are not always present on a given host (Windows development
+machines, or an App Service where the startup install failed). When it cannot
+run, the same document is drawn with ReportLab, which is pure Python, so a real
+PDF still goes out. Only if both fail does the customer get the branded
+document as an HTML attachment.
 """
 
+import base64
 import logging
 import pathlib
+from decimal import Decimal
 from email.utils import parseaddr
 from urllib.parse import urlparse
 
@@ -24,33 +28,78 @@ def weasyprint_available() -> bool:
     return True
 
 
-def render_quote_html(quote, request=None) -> str:
+def logo_path():
+    """Filesystem path of the light-background logo, or None if not built."""
+    from django.conf import settings
+    from django.contrib.staticfiles import finders
+
+    from .context_processors import LOGO_ON_LIGHT
+
+    found = finders.find(LOGO_ON_LIGHT) or pathlib.Path(settings.STATIC_ROOT or '', LOGO_ON_LIGHT)
+    found = pathlib.Path(found)
+    return found if found.is_file() else None
+
+
+def logo_data_uri():
+    """The logo inlined as a data: URI.
+
+    Embedding it means the document never fetches its own logo: no reliance on
+    ``SITE_URL`` matching the address the site is actually served from, no
+    round trip for WeasyPrint, and the HTML fallback shows it offline too.
+    """
+    path = logo_path()
+    if not path:
+        return None
+    return 'data:image/png;base64,' + base64.b64encode(path.read_bytes()).decode('ascii')
+
+
+def quote_document_context(quote):
+    """Everything either renderer needs to lay out the quote document."""
     from django.conf import settings
 
-    from .context_processors import absolute_logo_url
+    from .models import plain_number
 
-    return render_to_string(
-        'main/pdf/quote.html',
-        {
-            'quote': quote,
-            'items': quote.items.all(),
-            # WeasyPrint has no browser to resolve a relative static path, and
-            # the same markup doubles as the HTML fallback attachment.
-            'LOGO_URL': absolute_logo_url(),
-            'SITE_URL': settings.SITE_URL,
-            'CONTACT_EMAIL': parseaddr(settings.DEFAULT_FROM_EMAIL)[1],
-        },
-        request=request,
-    )
+    items = list(quote.items.all())
+    return {
+        'quote': quote,
+        'items': items,
+        # Area/rate headings when every line is sized; otherwise the columns
+        # also carry quantities and unit prices.
+        'all_sized': bool(items) and all(item.area_m2 > 0 for item in items),
+        'special': quote.special_rate_summary(),
+        'gst_pct': plain_number(Decimal(str(settings.GST_RATE)) * 100),
+        'valid_days': _valid_days(quote),
+        'SITE_URL': settings.SITE_URL,
+        'CONTACT_EMAIL': parseaddr(settings.DEFAULT_FROM_EMAIL)[1],
+    }
+
+
+def render_quote_html(quote, request=None) -> str:
+    context = quote_document_context(quote)
+    context['LOGO_URL'] = logo_data_uri()
+    return render_to_string('main/pdf/quote.html', context, request=request)
+
+
+def _valid_days(quote):
+    """How long the quote stands, counted from its issue date."""
+    from django.conf import settings
+    from django.utils import timezone
+
+    issued = quote.sent_at or quote.created_at
+    if quote.valid_until and issued:
+        days = (quote.valid_until - timezone.localtime(issued).date()).days
+        if days > 0:
+            return days
+    return settings.QUOTE_VALID_DAYS
 
 
 def render_quote_pdf(quote, request=None):
     """Render *quote* to a PDF.
 
-    Returns ``(filename, bytes, content_type)``. Falls back to HTML when
-    WeasyPrint is unavailable so callers never have to branch.
+    Returns ``(filename, bytes, content_type)``. Tries WeasyPrint, then
+    ReportLab, and only falls back to HTML if neither can produce a PDF, so
+    callers never have to branch.
     """
-    html = render_quote_html(quote, request=request)
     stem = quote.quote_number or f'quote-{quote.pk}'
 
     if weasyprint_available():
@@ -58,12 +107,22 @@ def render_quote_pdf(quote, request=None):
             from weasyprint import HTML
 
             pdf = HTML(
-                string=html, base_url=_base_url(request), url_fetcher=_local_static_fetcher()
+                string=render_quote_html(quote, request=request),
+                base_url=_base_url(request),
+                url_fetcher=_local_static_fetcher(),
             ).write_pdf()
             return f'{stem}.pdf', pdf, 'application/pdf'
         except Exception:  # pragma: no cover - renderer failure
-            logger.exception('WeasyPrint failed for %s; falling back to HTML.', stem)
+            logger.exception('WeasyPrint failed for %s; trying ReportLab.', stem)
 
+    try:
+        from .pdf_reportlab import render as render_with_reportlab
+
+        return f'{stem}.pdf', render_with_reportlab(quote_document_context(quote), logo_path()), 'application/pdf'
+    except Exception:  # pragma: no cover - renderer failure
+        logger.exception('ReportLab failed for %s; falling back to HTML.', stem)
+
+    html = render_quote_html(quote, request=request)
     return f'{stem}.html', html.encode('utf-8'), 'text/html'
 
 

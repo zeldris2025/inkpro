@@ -181,7 +181,7 @@ class QuoteTotalsTests(TestCase):
             quote=self.quote, category=self.category, description='Custom',
             width_m=Decimal('2.5'), height_m=Decimal('1'), quantity=1, unit_price=Decimal('350'),
         )
-        self.assertEqual(item.size, '2.5m x 1m')
+        self.assertEqual(item.size, '2.5m × 1m')
 
 
 class QuoteTransitionTests(TestCase):
@@ -1910,8 +1910,11 @@ class QuoteDocumentTests(TestCase):
     def test_the_mark_is_centred_on_white(self):
         markup = self.html()
         self.assertIn('.header { text-align: center;', markup)
-        self.assertIn('inkpro-logo.png', markup)
-        # The light-background artwork, not the white-on-dark variant.
+        # The light-background artwork, embedded rather than linked, so it
+        # shows whatever SITE_URL says and with no network at all.
+        from main.pdf import logo_data_uri
+
+        self.assertIn(f'<img src="{logo_data_uri()}"', markup)
         self.assertNotIn('inkpro-logo-on-dark.png', markup)
 
     def test_the_document_still_carries_its_figures(self):
@@ -1945,10 +1948,8 @@ class QuoteDocumentTests(TestCase):
 
     @override_settings(SITE_URL='http://127.0.0.1:9')  # nothing listens here
     def test_logo_is_embedded_without_fetching_over_http(self):
-        from main.pdf import render_quote_pdf, weasyprint_available
+        from main.pdf import render_quote_pdf
 
-        if not weasyprint_available():
-            self.skipTest('WeasyPrint is not installed on this host.')
         _, content, mimetype = render_quote_pdf(self.quote)
         self.assertEqual(mimetype, 'application/pdf')
         self.assertIn(b'/Subtype /Image', content)
@@ -1959,6 +1960,25 @@ class QuoteDocumentTests(TestCase):
         response = self.client.get(reverse('staff_quote_pdf', args=[self.quote.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response['Content-Disposition'].startswith('inline;'))
+
+    def test_staff_can_download_a_real_pdf(self):
+        staff = User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
+        self.client.force_login(staff)
+        response = self.client.get(reverse('staff_quote_pdf', args=[self.quote.pk]), {'download': 1})
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertTrue(response.content.startswith(b'%PDF'))
+        self.assertEqual(
+            response['Content-Disposition'], f'attachment; filename="{self.quote.quote_number}.pdf"'
+        )
+
+    def test_without_weasyprint_it_is_still_a_pdf(self):
+        from main.pdf import render_quote_pdf
+
+        with mock.patch('main.pdf.weasyprint_available', return_value=False):
+            filename, content, mimetype = render_quote_pdf(self.quote)
+        self.assertEqual(mimetype, 'application/pdf')
+        self.assertTrue(filename.endswith('.pdf'))
+        self.assertTrue(content.startswith(b'%PDF'))
 
 
 class FreshCheckoutTests(TestCase):
@@ -2795,3 +2815,131 @@ class TenantOwnershipTests(TestCase):
                 call_command('graphcheck', stdout=out)
 
         self.assertIn('ahliki.com belongs to this tenant', out.getvalue())
+
+
+#: The 17 lines of quote INK-Q-2026-0032 (Vodafone Samoa shopfront signs).
+VODAFONE_SIGNS = [
+    ('Apolima Store', 'Mulifanua Wharf', '4', '1.2'),
+    ('T & N Toleafoa', "Fasito'o-Uta", '6', '1.2'),
+    ("Amora's Shop & Takeaway", "Faleasi'u", '7', '1.2'),
+    ('Nimoe Chung Sum Store', "Le'auva'a", '5', '1'),
+    ("Annati's Variety Store", "Tuana'i", '6', '1.2'),
+    ('Malie Minimart', 'Malie', '6', '1.2'),
+    ("Utu'ava'ava Store", "Puipa'a", '5', '1.2'),
+    ('Ausiva Mart', "Puipa'a", '5.8', '1.2'),
+    ('Ah Chong Supermarket', "Puipa'a", '6', '1.2'),
+    ('Bargain Store', 'Vailoa', '5', '1.4'),
+    ('Grace of God Laundromat', 'Lotopa', '5', '1.2'),
+    ('R & J Mackenzie', 'Lotopa', '7', '1.2'),
+    ('Manuia Store', "Tuana'imato", '7', '1.1'),
+    ('IT Solution Ltd', 'Saleufi', '9.1', '1'),
+    ('Mobile Tech Samoa', 'Saleufi', '3', '1'),
+    ('Tanumaleko Shop & Laundromat', 'Papauta', '4', '1'),
+    ("Myna's Service Station", 'Vaoala', '4', '1'),
+]
+
+
+class ManualQuoteTests(TestCase):
+    """Staff can write a quote by hand, and its PDF follows the quote template."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
+        self.client.force_login(self.staff)
+
+    def post_vodafone(self, **extra):
+        data = {
+            'guest_name': 'Vodafone Samoa Ltd',
+            'guest_email': '',
+            'project_title': '17 shopfront signs across Upolu',
+            'normal_rate': '140.00',
+            'urgent_fee': '0',
+            'discount': '0',
+            'lines-TOTAL_FORMS': str(len(VODAFONE_SIGNS)),
+            'lines-INITIAL_FORMS': '0',
+            'lines-MIN_NUM_FORMS': '1',
+            'lines-MAX_NUM_FORMS': '1000',
+        }
+        for i, (name, location, width, height) in enumerate(VODAFONE_SIGNS):
+            data.update({
+                f'lines-{i}-description': f'Shop Signage — {name}',
+                f'lines-{i}-customer_brief': f'Location: {location}',
+                f'lines-{i}-width_m': width,
+                f'lines-{i}-height_m': height,
+                f'lines-{i}-rate_per_m2': '100',
+                f'lines-{i}-quantity': '1',
+            })
+        data.update(extra)
+        return self.client.post(reverse('staff_quote_new'), data)
+
+    def test_the_form_renders(self):
+        response = self.client.get(reverse('staff_quote_new'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'lines-__prefix__-description')
+
+    def test_inbox_links_to_it(self):
+        self.assertContains(self.client.get(reverse('staff_quote_inbox')), reverse('staff_quote_new'))
+
+    def test_customers_cannot_reach_it(self):
+        self.client.logout()
+        response = self.client.get(reverse('staff_quote_new'))
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_creates_a_quote_in_review_with_the_template_totals(self):
+        response = self.post_vodafone()
+        quote = Quote.objects.get()
+        self.assertRedirects(response, reverse('staff_quote_detail', args=[quote.pk]))
+        self.assertEqual(quote.status, Quote.IN_REVIEW)
+        self.assertEqual(quote.items.count(), 17)
+        self.assertEqual(quote.subtotal, Decimal('10916.00'))
+        self.assertEqual(quote.gst_amount, Decimal('1637.40'))
+        self.assertEqual(quote.total, Decimal('12553.40'))
+        first = quote.items.first()
+        self.assertEqual(first.size, '4m × 1.2m')
+        self.assertEqual(first.category.slug, 'custom-work')
+        self.assertFalse(first.category.is_active)
+
+    def test_the_pdf_matches_the_quote_template(self):
+        from main.pdf import render_quote_html
+
+        self.post_vodafone(**{
+            'lines-13-size': '9.1m × 1m (front) + 5.6m × 1m (right side)',
+            'lines-13-customer_brief': 'Location: Saleufi · priced on the 9.1m × 1m front sign only',
+        })
+        html = render_quote_html(Quote.objects.get())
+        for expected in (
+            'Vodafone Samoa Ltd', '17 shopfront signs across Upolu',
+            'Shop Signage — Apolima Store', 'Location: Mulifanua Wharf', '4m × 1.2m', '4.8 m²',
+            'Rate / m²', '$100.00', '$480.00', '6.96 m²', '$696.00',
+            '9.1m × 1m (front) + 5.6m × 1m (right side)', '9.1 m²', '$910.00',
+            'Subtotal (special rate)', '$10,916.00', 'GST (15%)', '$1,637.40', '$12,553.40',
+            'Special rate applied.', '$115.00 incl. GST', '$140.00 per m²',
+            '$17,574.76', 'a saving of $5,021.36',
+            'GST at 15% is shown separately and included in the total',
+            'valid for 30 days from the date of issue',
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, html)
+
+    def test_no_special_rate_block_without_a_normal_rate(self):
+        from main.pdf import render_quote_html
+
+        self.post_vodafone(normal_rate='')
+        html = render_quote_html(Quote.objects.get())
+        self.assertNotIn('Special rate applied', html)
+        self.assertNotIn('(special rate)', html)
+
+    def test_a_line_needs_a_rate_or_a_price(self):
+        response = self.post_vodafone(**{'lines-0-rate_per_m2': ''})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Quote.objects.exists())
+        self.assertContains(response, 'Give a rate per m² (with a size) or a unit price.')
+
+    def test_unsized_lines_use_a_unit_price(self):
+        response = self.post_vodafone(**{
+            'lines-TOTAL_FORMS': '1',
+            'lines-0-width_m': '', 'lines-0-height_m': '', 'lines-0-rate_per_m2': '',
+            'lines-0-unit_price': '25.00', 'lines-0-quantity': '4',
+        })
+        quote = Quote.objects.get()
+        self.assertEqual(quote.subtotal, Decimal('100.00'))
+        self.assertEqual(response.status_code, 302)
