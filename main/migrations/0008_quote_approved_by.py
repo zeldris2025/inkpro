@@ -22,7 +22,7 @@ def backfill_approver(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('main', '0006_register_contacts_and_reminders'),
+        ('main', '0007_quote_document_fields'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

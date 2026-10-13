@@ -24,6 +24,7 @@
   <div class="flex flex-wrap items-center gap-3">
     <span class="rounded-full bg-white/10 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">{{ quote.get_status_display }}</span>
     <a href="{% url 'staff_quote_pdf' quote.pk %}" target="_blank" class="ink-btn-ghost text-xs">Preview PDF</a>
+    <a href="{% url 'staff_quote_pdf' quote.pk %}?download=1" class="ink-btn text-xs">Download PDF</a>
     <a href="{{ quote.public_url }}" target="_blank" class="ink-btn-ghost text-xs">Customer view</a>
   </div>
 </div>
@@ -51,12 +52,12 @@
       {% csrf_token %}
       {{ formset.management_form }}
       <h2 class="font-display text-lg">Line items</h2>
-      <p class="text-xs text-zinc-500">Edit descriptions and prices freely — totals recalculate on save.</p>
+      <p class="text-xs text-zinc-500">Edit descriptions and prices freely — totals recalculate on save. With a rate per m² and a width and height, the unit price is worked out as rate × area.</p>
 
       <div class="mt-5 overflow-x-auto">
         <table class="w-full text-left text-sm">
           <thead class="text-xs uppercase tracking-wider text-zinc-500">
-            <tr><th class="pb-2 pr-3">Description</th><th class="pb-2 pr-3">Size</th><th class="pb-2 pr-3 w-20">Qty</th><th class="pb-2 pr-3 w-28">Unit $</th><th class="pb-2 pr-3 text-right">Line</th><th class="pb-2 w-12"></th></tr>
+            <tr><th class="pb-2 pr-3">Description</th><th class="pb-2 pr-3">Size</th><th class="pb-2 pr-3 w-20">W (m)</th><th class="pb-2 pr-3 w-20">H (m)</th><th class="pb-2 pr-3 w-24">Rate/m²</th><th class="pb-2 pr-3 w-20">Qty</th><th class="pb-2 pr-3 w-28">Unit $</th><th class="pb-2 pr-3 text-right">Line</th><th class="pb-2 w-12"></th></tr>
           </thead>
           <tbody class="divide-y divide-zinc-100">
             {% for item_form in formset %}
@@ -65,20 +66,22 @@
               <td class="py-2 pr-3">{{ item_form.description }}
                 {% if item_form.instance.added_by_staff %}<span class="mt-1 inline-block rounded bg-ink-cyan/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-sky-700">Staff added</span>{% endif %}
                 {% if item_form.instance.artwork %}<a href="{{ item_form.instance.artwork.url }}" target="_blank" class="mt-1 block text-xs font-bold text-sky-600 hover:underline">📎 Artwork</a>{% endif %}
-                {% if item_form.instance.customer_brief %}
-                <div class="mt-2 rounded border-l-2 border-ink-cyan bg-sky-50 px-2.5 py-1.5 text-xs text-zinc-700">
-                  <span class="block text-[10px] font-bold uppercase tracking-widest text-sky-700">What they want</span>
-                  {{ item_form.instance.customer_brief|linebreaksbr }}
+                <div class="mt-2">
+                  <span class="block text-[10px] font-bold uppercase tracking-widest {% if item_form.instance.added_by_staff %}text-zinc-400">Note on quote{% else %}text-sky-700">What they want{% endif %}</span>
+                  {{ item_form.customer_brief }}
                 </div>
-                {% endif %}
+                {% for error in item_form.errors.values %}<p class="mt-1 text-xs font-semibold text-red-600">{{ error|join:" " }}</p>{% endfor %}
               </td>
               <td class="py-2 pr-3">{{ item_form.size }}</td>
+              <td class="py-2 pr-3">{{ item_form.width_m }}</td>
+              <td class="py-2 pr-3">{{ item_form.height_m }}</td>
+              <td class="py-2 pr-3">{{ item_form.rate_per_m2 }}</td>
               <td class="py-2 pr-3">{{ item_form.quantity }}</td>
               <td class="py-2 pr-3">{{ item_form.unit_price }}</td>
               <td class="py-2 pr-3 text-right font-bold tabular">${{ item_form.instance.line_total|floatformat:2|intcomma }}</td>
               <td class="py-2 text-center">{{ item_form.DELETE }}</td>
             </tr>
-            {% empty %}<tr><td colspan="6" class="py-8 text-center text-zinc-400">No line items.</td></tr>{% endfor %}
+            {% empty %}<tr><td colspan="9" class="py-8 text-center text-zinc-400">No line items.</td></tr>{% endfor %}
           </tbody>
         </table>
       </div>
@@ -86,7 +89,7 @@
       <h2 class="mt-8 font-display text-lg">Adjustments</h2>
       <div class="mt-4 grid gap-4 sm:grid-cols-2">
         {% for field in form %}
-        <div class="{% if field.name == 'staff_notes' %}sm:col-span-2{% endif %}">
+        <div class="{% if field.name in 'staff_notes project_title' %}sm:col-span-2{% endif %}">
           <label for="{{ field.id_for_label }}" class="mb-1.5 block text-xs font-bold uppercase tracking-widest text-zinc-500">{{ field.label }}</label>
           {{ field }}
           {% if field.help_text %}<p class="mt-1 text-xs text-zinc-400">{{ field.help_text }}</p>{% endif %}

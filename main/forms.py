@@ -195,10 +195,20 @@ class StaffQuoteItemForm(forms.ModelForm):
 
     class Meta:
         model = QuoteItem
-        fields = ['description', 'size', 'quantity', 'unit_price']
+        fields = [
+            'description', 'customer_brief', 'size', 'width_m', 'height_m',
+            'rate_per_m2', 'quantity', 'unit_price',
+        ]
         widgets = {
             'description': forms.TextInput(attrs={'class': LIGHT_INPUT}),
+            'customer_brief': forms.Textarea(
+                attrs={'rows': 2, 'class': LIGHT_INPUT + ' text-xs',
+                       'placeholder': 'Note shown under the description, e.g. Location: Apia'}
+            ),
             'size': forms.TextInput(attrs={'class': LIGHT_INPUT}),
+            'width_m': forms.NumberInput(attrs={'step': '0.001', 'min': '0', 'class': LIGHT_INPUT}),
+            'height_m': forms.NumberInput(attrs={'step': '0.001', 'min': '0', 'class': LIGHT_INPUT}),
+            'rate_per_m2': forms.NumberInput(attrs={'step': '0.01', 'min': '0', 'class': LIGHT_INPUT}),
             'quantity': forms.NumberInput(attrs={'min': 0, 'class': LIGHT_INPUT}),
             'unit_price': forms.NumberInput(attrs={'step': '0.01', 'class': LIGHT_INPUT}),
         }
@@ -214,8 +224,14 @@ class StaffQuoteForm(forms.ModelForm):
 
     class Meta:
         model = Quote
-        fields = ['urgent_fee', 'discount', 'total_override', 'valid_until', 'staff_notes']
+        fields = [
+            'project_title', 'normal_rate', 'urgent_fee', 'discount', 'total_override',
+            'valid_until', 'staff_notes',
+        ]
         widgets = {
+            'normal_rate': forms.NumberInput(
+                attrs={'step': '0.01', 'min': '0', 'placeholder': 'e.g. 140.00 — blank for no special rate'}
+            ),
             'urgent_fee': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
             'discount': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
             'total_override': forms.NumberInput(
@@ -241,6 +257,108 @@ class StaffQuoteItemAddForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['category'].queryset = ServiceCategory.objects.filter(is_active=True)
         style(self.fields, LIGHT_INPUT)
+
+
+class StaffManualQuoteForm(forms.ModelForm):
+    """Header of a quote staff write themselves, e.g. one taken over the phone."""
+
+    class Meta:
+        model = Quote
+        fields = [
+            'customer', 'guest_name', 'guest_email', 'guest_phone', 'project_title',
+            'normal_rate', 'is_urgent', 'urgent_fee', 'discount', 'valid_until', 'staff_notes',
+        ]
+        labels = {
+            'customer': 'Existing customer (optional)',
+            'guest_name': 'Client name',
+            'guest_email': 'Email',
+            'guest_phone': 'Phone',
+            'project_title': 'Job summary',
+            'normal_rate': 'Normal rate per m² (optional)',
+            'is_urgent': 'Rush job',
+        }
+        help_texts = {
+            'guest_name': 'Business or person the quote is prepared for.',
+            'guest_email': 'Needed to email the quote; leave blank to just download the PDF.',
+            'normal_rate': 'Set this when the lines are at a special rate — the PDF then shows the saving.',
+        }
+        widgets = {
+            'project_title': forms.TextInput(attrs={'placeholder': 'e.g. 17 shopfront signs across Upolu'}),
+            'normal_rate': forms.NumberInput(attrs={'step': '0.01', 'min': '0', 'placeholder': 'e.g. 140.00'}),
+            'urgent_fee': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
+            'discount': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
+            'valid_until': forms.DateInput(attrs={'type': 'date'}),
+            'staff_notes': forms.Textarea(attrs={'rows': 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['customer'].required = False
+        self.fields['customer'].empty_label = '— New / walk-in client —'
+        style(self.fields, LIGHT_INPUT)
+
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get('customer') and not (cleaned.get('guest_name') or '').strip():
+            self.add_error('guest_name', 'Give a client name or pick an existing customer.')
+        return cleaned
+
+
+class StaffManualLineForm(forms.ModelForm):
+    """One line of a staff-written quote: sized at a rate per m², or a fixed price."""
+
+    class Meta:
+        model = QuoteItem
+        fields = [
+            'category', 'description', 'customer_brief', 'width_m', 'height_m', 'size',
+            'rate_per_m2', 'quantity', 'unit_price',
+        ]
+        labels = {
+            'customer_brief': 'Note',
+            'width_m': 'Width (m)',
+            'height_m': 'Height (m)',
+            'size': 'Size label',
+            'rate_per_m2': 'Rate / m²',
+            'quantity': 'Qty',
+            'unit_price': 'Unit price',
+        }
+        widgets = {
+            'description': forms.TextInput(attrs={'placeholder': 'e.g. Shop Signage — Apolima Store'}),
+            'customer_brief': forms.TextInput(attrs={'placeholder': 'e.g. Location: Mulifanua Wharf'}),
+            'width_m': forms.NumberInput(attrs={'step': '0.001', 'min': '0', 'data-calc': 'width'}),
+            'height_m': forms.NumberInput(attrs={'step': '0.001', 'min': '0', 'data-calc': 'height'}),
+            'size': forms.TextInput(attrs={'placeholder': 'Auto from W × H'}),
+            'rate_per_m2': forms.NumberInput(attrs={'step': '0.01', 'min': '0', 'data-calc': 'rate'}),
+            'quantity': forms.NumberInput(attrs={'min': 1, 'data-calc': 'qty'}),
+            'unit_price': forms.NumberInput(
+                attrs={'step': '0.01', 'min': '0', 'data-calc': 'unit', 'placeholder': 'If not sized'}
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['category'].queryset = ServiceCategory.objects.filter(is_active=True)
+        self.fields['category'].required = False
+        self.fields['category'].empty_label = 'Custom work'
+        self.fields['unit_price'].required = False
+        style(self.fields, LIGHT_INPUT)
+
+    def clean(self):
+        cleaned = super().clean()
+        width, height = cleaned.get('width_m'), cleaned.get('height_m')
+        rate, unit = cleaned.get('rate_per_m2'), cleaned.get('unit_price')
+        if bool(width) != bool(height):
+            self.add_error('height_m' if width else 'width_m', 'Give both width and height.')
+        if rate is not None and not (width and height):
+            self.add_error('rate_per_m2', 'A rate per m² needs a width and height.')
+        if rate is None and not unit:
+            self.add_error('unit_price', 'Give a rate per m² (with a size) or a unit price.')
+        return cleaned
+
+
+StaffManualLineFormSet = forms.modelformset_factory(
+    QuoteItem, form=StaffManualLineForm, extra=0, min_num=1, validate_min=True
+)
 
 
 class InvoiceForm(forms.ModelForm):

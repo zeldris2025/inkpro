@@ -1,0 +1,178 @@
+{% extends "main/staff/base_staff.html" %}
+{% block staff_title %}New quote{% endblock %}
+{% block staff_content %}
+<a href="{% url 'staff_quote_inbox' %}" class="text-sm font-semibold text-white/50 transition hover:text-ink-yellow">← Quote inbox</a>
+<h1 class="mt-5 font-display text-3xl">New quote</h1>
+<p class="mt-1 text-sm text-white/45">Write a quote by hand. It's saved to review, where you can preview the PDF and approve &amp; send it.</p>
+
+<form method="post" id="manual-quote" class="mt-7 grid gap-6 lg:grid-cols-3">
+  {% csrf_token %}
+  {{ formset.management_form }}
+
+  <div class="space-y-6 lg:col-span-2">
+    <!-- Client -->
+    <div class="rounded-xl border border-white/10 bg-white p-6 text-zinc-900">
+      <h2 class="font-display text-lg">Prepared for</h2>
+      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        {% for field in form %}{% if field.name in 'customer guest_name guest_email guest_phone project_title' %}
+        <div class="{% if field.name == 'project_title' %}sm:col-span-2{% endif %}">
+          <label for="{{ field.id_for_label }}" class="mb-1.5 block text-xs font-bold uppercase tracking-widest text-zinc-500">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<p class="mt-1 text-xs text-zinc-400">{{ field.help_text }}</p>{% endif %}
+          {% for error in field.errors %}<p class="mt-1 text-xs font-semibold text-red-600">{{ error }}</p>{% endfor %}
+        </div>
+        {% endif %}{% endfor %}
+      </div>
+    </div>
+
+    <!-- Lines -->
+    <div class="rounded-xl border border-white/10 bg-white p-6 text-zinc-900">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 class="font-display text-lg">Line items</h2>
+          <p class="text-xs text-zinc-500">Sized work: give width × height and a rate per m². Anything else: a unit price. The note prints under the description.</p>
+        </div>
+      </div>
+      {% for error in formset.non_form_errors %}<p class="mt-3 text-sm font-semibold text-red-600">{{ error }}</p>{% endfor %}
+
+      <div id="lines" class="mt-5 space-y-4">
+        {% for line in formset %}{% include "main/staff/_manual_line.html" with line=line number=forloop.counter %}{% endfor %}
+      </div>
+      <template id="empty-line">{% include "main/staff/_manual_line.html" with line=formset.empty_form number="" %}</template>
+
+      <button type="button" id="add-line" class="ink-btn-ghost mt-5 border-zinc-300 text-zinc-800 hover:border-ink-yellow hover:text-zinc-900">+ Add line</button>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="space-y-5">
+    <div class="rounded-xl border border-white/10 bg-white p-6 text-zinc-900">
+      <h2 class="font-display text-lg">Pricing &amp; terms</h2>
+      <div class="mt-4 space-y-4">
+        {% for field in form %}{% if field.name in 'normal_rate is_urgent urgent_fee discount valid_until staff_notes' %}
+        <div>
+          {% if field.name == 'is_urgent' %}
+          <label class="flex items-center gap-2 text-sm font-semibold">{{ field }} {{ field.label }}</label>
+          {% else %}
+          <label for="{{ field.id_for_label }}" class="mb-1.5 block text-xs font-bold uppercase tracking-widest text-zinc-500">{{ field.label }}</label>
+          {{ field }}
+          {% endif %}
+          {% if field.help_text %}<p class="mt-1 text-xs text-zinc-400">{{ field.help_text }}</p>{% endif %}
+          {% for error in field.errors %}<p class="mt-1 text-xs font-semibold text-red-600">{{ error }}</p>{% endfor %}
+        </div>
+        {% endif %}{% endfor %}
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-white/10 bg-white/5 p-6 lg:sticky lg:top-32">
+      <h2 class="font-display text-lg">Totals</h2>
+      <dl class="mt-4 space-y-2 text-sm">
+        <div class="flex justify-between text-white/55"><dt>Area</dt><dd class="tabular"><span data-total="area">0</span> m²</dd></div>
+        <div class="flex justify-between text-white/55"><dt>Subtotal</dt><dd class="tabular" data-total="subtotal">$0.00</dd></div>
+        <div class="flex justify-between text-white/55"><dt>GST ({{ GST_RATE_PCT }}%)</dt><dd class="tabular" data-total="gst">$0.00</dd></div>
+        <div class="flex items-baseline justify-between border-t border-white/15 pt-3">
+          <dt class="font-display">Total</dt><dd class="font-display text-2xl text-ink-yellow tabular" data-total="total">$0.00</dd>
+        </div>
+        <p class="hidden text-xs font-bold text-green-400" data-total="saving"></p>
+      </dl>
+      <button type="submit" class="ink-btn mt-6 w-full justify-center py-3.5 text-base">Create quote</button>
+      <p class="mt-3 text-xs text-white/40">Nothing is emailed yet — you'll review it first.</p>
+    </div>
+  </div>
+</form>
+
+<script>
+(function () {
+  const form = document.getElementById('manual-quote');
+  const lines = document.getElementById('lines');
+  const template = document.getElementById('empty-line');
+  const totalForms = form.querySelector('[name="lines-TOTAL_FORMS"]');
+  const gstRate = {{ GST_RATE_PCT }} / 100;
+  const money = (n) => '$' + n.toLocaleString('en-NZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const num = (row, key) => parseFloat((row.querySelector('[data-calc="' + key + '"]') || {}).value) || 0;
+  const field = (name) => form.querySelector('[name="' + name + '"]');
+
+  function renumber() {
+    const rows = lines.querySelectorAll('[data-line]');
+    rows.forEach((row, i) => {
+      row.querySelector('[data-line-number]').textContent = i + 1;
+      row.querySelectorAll('[name], [id], [for]').forEach((el) => {
+        ['name', 'id', 'for'].forEach((attr) => {
+          const value = el.getAttribute(attr);
+          if (value) el.setAttribute(attr, value.replace(/lines-(\d+|__prefix__)-/, 'lines-' + i + '-'));
+        });
+      });
+      row.querySelector('[data-remove]').classList.toggle('invisible', rows.length === 1);
+    });
+    totalForms.value = rows.length;
+  }
+
+  function recalc() {
+    let subtotal = 0, area = 0, normalSubtotal = 0;
+    const normalRate = parseFloat(field('normal_rate').value) || 0;
+    lines.querySelectorAll('[data-line]').forEach((row) => {
+      const w = num(row, 'width'), h = num(row, 'height'), rate = row.querySelector('[data-calc="rate"]').value;
+      const qty = row.querySelector('[data-calc="qty"]').value === '' ? 1 : num(row, 'qty');
+      const lineArea = w > 0 && h > 0 ? w * h : 0;
+      const unit = lineArea && rate !== '' ? round2(parseFloat(rate) * lineArea) : num(row, 'unit');
+      const line = round2(unit * qty);
+      row.querySelector('[data-line-area]').textContent = lineArea ? +lineArea.toFixed(2) + ' m²' : '—';
+      row.querySelector('[data-line-total]').textContent = money(line);
+      const unitInput = row.querySelector('[data-calc="unit"]');
+      unitInput.disabled = !!(lineArea && rate !== '');
+      subtotal += line;
+      area += lineArea * qty;
+      normalSubtotal += lineArea && normalRate ? round2(normalRate * lineArea) * qty : line;
+    });
+    const adjust = (parseFloat(field('urgent_fee').value) || 0) - (parseFloat(field('discount').value) || 0);
+    const taxable = Math.max(round2(subtotal + adjust), 0);
+    const gst = round2(taxable * gstRate);
+    const total = taxable + gst;
+    const set = (key, text) => (form.querySelector('[data-total="' + key + '"]').textContent = text);
+    set('area', +area.toFixed(2));
+    set('subtotal', money(subtotal));
+    set('gst', money(gst));
+    set('total', money(total));
+    const normalTaxable = Math.max(round2(normalSubtotal + adjust), 0);
+    const saving = round2(normalTaxable + round2(normalTaxable * gstRate) - total);
+    const savingEl = form.querySelector('[data-total="saving"]');
+    savingEl.classList.toggle('hidden', !(normalRate && saving > 0));
+    savingEl.textContent = 'Saving vs normal rate: ' + money(saving);
+  }
+
+  document.getElementById('add-line').addEventListener('click', () => {
+    const rows = lines.querySelectorAll('[data-line]');
+    const previous = rows[rows.length - 1];
+    lines.insertAdjacentHTML('beforeend', template.innerHTML);
+    const added = lines.lastElementChild;
+    // Carry the rate and category down: a run of signs is usually all one price.
+    if (previous) {
+      ['rate'].forEach((key) => {
+        added.querySelector('[data-calc="' + key + '"]').value = previous.querySelector('[data-calc="' + key + '"]').value;
+      });
+      const category = previous.querySelector('select');
+      if (category) added.querySelector('select').value = category.value;
+    }
+    renumber();
+    recalc();
+    added.querySelector('input[type="text"]').focus();
+  });
+
+  lines.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-remove]');
+    if (!button || lines.querySelectorAll('[data-line]').length === 1) return;
+    button.closest('[data-line]').remove();
+    renumber();
+    recalc();
+  });
+
+  // Disabled inputs are not submitted, which is what we want for a computed
+  // unit price — but re-enable before submit so validation errors keep values.
+  form.addEventListener('submit', () => form.querySelectorAll('[data-calc="unit"]').forEach((el) => (el.disabled = false)));
+  form.addEventListener('input', recalc);
+  renumber();
+  recalc();
+})();
+</script>
+{% endblock %}

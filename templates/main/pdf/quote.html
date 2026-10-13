@@ -30,6 +30,7 @@ table.totals { width: 48%; margin-left: 52%; margin-top: 14px; border-collapse: 
 table.totals td { padding: 4px 8px; font-size: 9.5pt; }
 table.totals tr.grand td { border-top: 2px solid #18181b; font-size: 13pt; font-weight: 900; padding-top: 9px; }
 .badge { display: inline-block; background: #FFD200; color: #000; font-size: 7.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 1pt; padding: 4px 11px; border-radius: 99px; }
+.callout { margin-top: 24px; padding: 12px 14px; background: #fafafa; border-left: 3px solid #FFD200; font-size: 9pt; line-height: 1.6; }
 .notes { margin-top: 24px; padding: 12px 14px; background: #fafafa; border-left: 3px solid #FFD200; font-size: 9pt; }
 .terms { margin-top: 26px; padding-top: 12px; border-top: 1px solid #e4e4e7; font-size: 7.5pt; color: #a1a1aa; line-height: 1.6; }
 </style></head>
@@ -51,7 +52,6 @@ block, before the document body returns to the left margin.{% endcomment %}
   {% if quote.status == 'ACCEPTED' %}<div style="margin:6px 0 4px;"><span class="stamp">✓ Accepted{% if quote.responded_at %} {{ quote.responded_at|date:"j F Y" }}{% endif %} · Final quote</span></div>{% endif %}
   <div class="muted" style="font-size:9pt;">
     Issued {{ quote.sent_at|default:quote.created_at|date:"j F Y" }}
-    {% if quote.valid_until %} · valid until {{ quote.valid_until|date:"j F Y" }}{% endif %}
     {% if quote.is_urgent %} · <span class="badge">Rush job</span>{% endif %}
   </div>
 </div>
@@ -61,7 +61,8 @@ block, before the document body returns to the left margin.{% endcomment %}
     <td>
       <div class="label">Prepared for</div>
       <strong>{{ quote.contact_name|default:"—" }}</strong><br>
-      {% if quote.customer.company_name %}{{ quote.customer.company_name }}<br>{% endif %}
+      {% if quote.customer.company_name and quote.customer.company_name != quote.contact_name %}{{ quote.customer.company_name }}<br>{% endif %}
+      {% if quote.project_title %}{{ quote.project_title }}<br>{% endif %}
       {% if quote.contact_email %}{{ quote.contact_email }}<br>{% endif %}
       {% if quote.contact_phone %}{{ quote.contact_phone }}{% endif %}
     </td>
@@ -76,8 +77,10 @@ block, before the document body returns to the left margin.{% endcomment %}
 
 <table class="items">
   <thead><tr>
-    <th style="width:46%;">Description</th><th style="width:16%;">Size</th>
-    <th class="right" style="width:10%;">Qty</th><th class="right" style="width:14%;">Unit price</th><th class="right" style="width:14%;">Total</th>
+    <th style="width:40%;">Description</th><th style="width:20%;">Size</th>
+    <th class="right" style="width:12%;">{% if all_sized %}Area{% else %}Qty / Area{% endif %}</th>
+    <th class="right" style="width:14%;">{% if all_sized %}Rate / m²{% else %}Rate{% endif %}</th>
+    <th class="right" style="width:14%;">Total</th>
   </tr></thead>
   <tbody>
     {% for item in items %}
@@ -85,8 +88,13 @@ block, before the document body returns to the left margin.{% endcomment %}
       <td><strong>{{ item.description }}</strong>{% if item.pricing_rule.notes %}<div class="sub">{{ item.pricing_rule.notes }}</div>{% endif %}
         {% if item.customer_brief %}<div class="brief">{{ item.customer_brief|linebreaksbr }}</div>{% endif %}</td>
       <td>{{ item.size|default:"—" }}</td>
+      {% if item.area_label %}
+      <td class="right">{{ item.area_label }} m²{% if item.quantity != 1 %}<div class="sub">× {{ item.quantity }}</div>{% endif %}</td>
+      <td class="right">${{ item.rate|floatformat:2|intcomma }}</td>
+      {% else %}
       <td class="right">{{ item.quantity }}</td>
-      <td class="right">${{ item.unit_price|floatformat:2|intcomma }}</td>
+      <td class="right">${{ item.unit_price|floatformat:2|intcomma }}{% if not all_sized %}<div class="sub">each</div>{% endif %}</td>
+      {% endif %}
       <td class="right"><strong>${{ item.line_total|floatformat:2|intcomma }}</strong></td>
     </tr>
     {% empty %}<tr><td colspan="5" class="muted">No line items.</td></tr>{% endfor %}
@@ -94,22 +102,32 @@ block, before the document body returns to the left margin.{% endcomment %}
 </table>
 
 <table class="totals">
-  <tr><td class="muted">Subtotal</td><td class="right">${{ quote.subtotal|floatformat:2|intcomma }}</td></tr>
+  <tr><td class="muted">Subtotal{% if special %} (special rate){% endif %}</td><td class="right">${{ quote.subtotal|floatformat:2|intcomma }}</td></tr>
   {% if quote.discount %}<tr><td class="muted">Discount</td><td class="right">−${{ quote.discount|floatformat:2|intcomma }}</td></tr>{% endif %}
   {% if quote.urgent_fee %}<tr><td class="muted">Urgency fee</td><td class="right">${{ quote.urgent_fee|floatformat:2|intcomma }}</td></tr>{% endif %}
-  <tr><td class="muted">GST</td><td class="right">${{ quote.gst_amount|floatformat:2|intcomma }}</td></tr>
+  <tr><td class="muted">GST ({{ gst_pct }}%)</td><td class="right">${{ quote.gst_amount|floatformat:2|intcomma }}</td></tr>
   <tr class="grand"><td>Total</td><td class="right">${{ quote.total|floatformat:2|intcomma }}</td></tr>
 </table>
+
+{% if special %}
+<div class="callout">
+  <strong>Special rate applied.</strong>
+  This quote is priced at the special rate of
+  {% if special.rate is not None %}${{ special.rate|floatformat:2|intcomma }} per m² + GST (${{ special.rate_inc_gst|floatformat:2|intcomma }} incl. GST).{% else %}below our normal per m² rate.{% endif %}
+  At the normal rate of ${{ special.normal_rate|floatformat:2|intcomma }} per m² + GST, the same work would total
+  ${{ special.normal_total|floatformat:2|intcomma }} — a saving of ${{ special.saving|floatformat:2|intcomma }}.
+</div>
+{% endif %}
 
 {% if quote.customer_notes %}
 <div class="notes"><div class="label">Your notes</div>{{ quote.customer_notes|linebreaksbr }}</div>
 {% endif %}
 
 <div class="terms">
-  <strong>Terms.</strong> All amounts are in Samoan Tala (WST). GST is included in the total as shown.
-  This quote is valid {% if quote.valid_until %}until {{ quote.valid_until|date:"j F Y" }}{% else %}for 30 days from the date of issue{% endif %}
+  <strong>Terms.</strong> All amounts are in Samoan Tala (WST). GST at {{ gst_pct }}% is shown separately and included in the total.
+  This quote is valid for {{ valid_days }} days from the date of issue
   and is subject to final artwork approval. Production begins once the quote is accepted and artwork is confirmed.
-  Rush and same-day work carries the urgency fee shown above.
+  {% if quote.urgent_fee %}Rush and same-day work carries the urgency fee shown above.{% endif %}
 </div>
 
 </body></html>

@@ -12,6 +12,13 @@ from django.utils import timezone
 from . import pricing
 
 
+def plain_number(value) -> str:
+    """A Decimal without trailing zeros or exponent: 4.800 -> "4.8", 10 -> "10"."""
+    if value is None:
+        return ''
+    return f'{Decimal(str(value)).normalize():f}'
+
+
 def _token():
     """URL-safe token backing the no-login quote view link emailed to customers."""
     return secrets.token_urlsafe(32)
@@ -374,6 +381,20 @@ class Quote(models.Model):
     )
 
     is_urgent = models.BooleanField(default=False)
+    project_title = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='One-line job summary printed under the client name, e.g. "17 shopfront signs across Upolu".',
+    )
+    normal_rate = models.DecimalField(
+        'normal rate per m²',
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='GST-exclusive standard rate. When set, the quote is shown as a special rate '
+        'with the saving against this rate.',
+    )
     customer_notes = models.TextField(blank=True)
     staff_notes = models.TextField(blank=True, help_text='Internal only — never shown to customers.')
     decline_reason = models.TextField(blank=True)
@@ -475,6 +496,48 @@ class Quote(models.Model):
             )
         return self
 
+    def special_rate_summary(self):
+        """The "special rate applied" figures for the quote document, or None.
+
+        Prices the same square metres at ``normal_rate`` (lines with no area
+        keep their own price), runs that through the same discount, urgency
+        fee and GST as the real quote, and reports the difference. Returns
+        None when no normal rate is set or it would not be a saving.
+        """
+        if self.normal_rate is None:
+            return None
+        items = list(self.items.all())
+        sized = [item for item in items if item.area_m2 > 0]
+        if not sized:
+            return None
+        normal_rate = pricing.money(self.normal_rate)
+        normal_subtotal = sum(
+            (
+                pricing.line_total(normal_rate * item.area_m2, item.quantity)
+                if item.area_m2 > 0
+                else item.line_total
+                for item in items
+            ),
+            Decimal('0'),
+        )
+        taxable = max(
+            normal_subtotal - pricing.money(self.discount or 0) + pricing.money(self.urgent_fee or 0),
+            Decimal('0'),
+        )
+        normal_total = pricing.money(taxable + pricing.add_gst(taxable))
+        saving = normal_total - pricing.money(self.total)
+        if saving <= 0:
+            return None
+        rates = {item.rate for item in sized}
+        rate = rates.pop() if len(rates) == 1 else None
+        return {
+            'rate': rate,
+            'rate_inc_gst': pricing.money(rate + pricing.add_gst(rate)) if rate is not None else None,
+            'normal_rate': normal_rate,
+            'normal_total': normal_total,
+            'saving': saving,
+        }
+
     # -- workflow ------------------------------------------------------------
     def can_transition_to(self, new_status) -> bool:
         if new_status == self.status:
@@ -573,6 +636,14 @@ class QuoteItem(models.Model):
     width_m = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True)
     height_m = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True)
     quantity = models.PositiveIntegerField(default=1)
+    rate_per_m2 = models.DecimalField(
+        'rate per m²',
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='When set with a width and height, the unit price is rate × area.',
+    )
     unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     line_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     artwork = models.FileField(upload_to='artwork/%Y/%m/', blank=True, null=True)
@@ -596,16 +667,33 @@ class QuoteItem(models.Model):
         return self.pricing_rule.unit_price(self.width_m, self.height_m)
 
     def save(self, *args, **kwargs):
-        if self.pricing_rule and not self.added_by_staff and not self.unit_price:
+        if self.rate_per_m2 is not None and self.area_m2 > 0:
+            self.unit_price = pricing.money(Decimal(str(self.rate_per_m2)) * self.area_m2)
+        elif self.pricing_rule and not self.added_by_staff and not self.unit_price:
             self.unit_price = self.price_from_rule()
         self.line_total = pricing.line_total(self.unit_price, self.quantity)
         if not self.size and self.width_m and self.height_m:
-            self.size = f'{self.width_m:g}m x {self.height_m:g}m'
+            self.size = f'{plain_number(self.width_m)}m × {plain_number(self.height_m)}m'
         super().save(*args, **kwargs)
 
     @property
     def area_m2(self):
         return pricing.area(self.width_m, self.height_m)
+
+    @property
+    def area_label(self):
+        """Square metres for the quote document, e.g. "4.8"; blank with no size."""
+        area = self.area_m2
+        return plain_number(area.quantize(Decimal('0.01'))) if area > 0 else ''
+
+    @property
+    def rate(self):
+        """GST-exclusive price per square metre, or None for an unsized line."""
+        if self.area_m2 <= 0:
+            return None
+        if self.rate_per_m2 is not None:
+            return pricing.money(self.rate_per_m2)
+        return pricing.money(Decimal(str(self.unit_price)) / self.area_m2)
 
 
 class Invoice(models.Model):
