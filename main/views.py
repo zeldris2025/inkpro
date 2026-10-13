@@ -35,7 +35,6 @@ from .models import (
 )
 from .permissions import CUSTOMER_GROUP
 from .tasks import (
-    notify_staff_new_quote_task,
     notify_staff_quote_response_task,
     run_task,
     send_quote_accepted_task,
@@ -229,7 +228,7 @@ def quote_review(request):
             return redirect('quote_builder')
 
         run_task(send_quote_received_task, quote.pk)
-        run_task(notify_staff_new_quote_task, quote.pk)
+        # The staff alert is sent by main.signals as the quote is submitted.
         request.session.pop(DRAFT_SESSION_KEY, None)
         request.session['submitted_quote_token'] = quote.access_token
         return redirect('quote_submitted', token=quote.access_token)

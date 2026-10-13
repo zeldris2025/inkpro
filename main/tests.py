@@ -290,16 +290,17 @@ class QuoteWizardFlowTests(TestCase):
         quote = Quote.objects.get(status=Quote.DRAFT)
         self.assertEqual(quote.total, Decimal('644.00'))
 
-        submit = self.client.post(
-            reverse('quote_review'),
-            {
-                'guest_name': 'Ada Lovelace',
-                'guest_email': 'ada@example.com',
-                'guest_phone': '021 555 0000',
-                'customer_notes': 'Need it by Friday.',
-                'is_urgent': 'on',
-            },
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            submit = self.client.post(
+                reverse('quote_review'),
+                {
+                    'guest_name': 'Ada Lovelace',
+                    'guest_email': 'ada@example.com',
+                    'guest_phone': '021 555 0000',
+                    'customer_notes': 'Need it by Friday.',
+                    'is_urgent': 'on',
+                },
+            )
         quote.refresh_from_db()
         self.assertEqual(quote.status, Quote.SUBMITTED)
         self.assertEqual(quote.urgent_fee, Decimal('50.00'))
@@ -316,10 +317,11 @@ class QuoteWizardFlowTests(TestCase):
             reverse('quote_configure', args=['banners']),
             {'pricing_rule': self.rule.pk, 'quantity': 1},
         )
-        self.client.post(
-            reverse('quote_review'),
-            {'guest_name': 'Ada', 'guest_email': 'ada@example.com', 'guest_phone': '021 555 0000'},
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(
+                reverse('quote_review'),
+                {'guest_name': 'Ada', 'guest_email': 'ada@example.com', 'guest_phone': '021 555 0000'},
+            )
         quote = Quote.objects.get()
         staff = next(m for m in mail.outbox if m.to == ['inkpro@ahliki.com'])
         self.assertIn(quote.quote_number, staff.subject)
@@ -415,6 +417,140 @@ class QuoteWizardFlowTests(TestCase):
         quote = Quote.objects.create(guest_name='Ada', status=Quote.SUBMITTED)
         response = self.client.get(reverse('public_quote', args=[quote.access_token]))
         self.assertEqual(response.status_code, 403)
+
+
+@override_settings(STAFF_NOTIFY_EMAILS=['inkpro@ahliki.com'])
+class NewQuoteAlertTests(TestCase):
+    """Staff hear about every new quote, however it was created."""
+
+    def setUp(self):
+        self.category = ServiceCategory.objects.create(name='Banners', slug='banners')
+
+    def alerts(self):
+        return [m for m in mail.outbox if m.to == ['inkpro@ahliki.com']]
+
+    def test_a_quote_created_in_admin_alerts_staff_with_its_lines(self):
+        admin = User.objects.create_superuser('boss', 'boss@example.com', 'pw')
+        self.client.force_login(admin)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse('admin:main_quote_add'), {
+                'guest_name': 'Walk-in Customer', 'guest_email': 'walkin@example.com',
+                'guest_phone': '', 'status': Quote.SUBMITTED, 'urgent_fee': '0', 'discount': '0',
+                'total_override': '', 'customer_notes': '', 'staff_notes': '', 'decline_reason': '',
+                'revision': '0',
+                'items-TOTAL_FORMS': '1', 'items-INITIAL_FORMS': '0',
+                'items-MIN_NUM_FORMS': '0', 'items-MAX_NUM_FORMS': '1000',
+                'items-0-description': 'Pull-up banner', 'items-0-category': self.category.pk,
+                'items-0-size': '', 'items-0-quantity': '2', 'items-0-unit_price': '300',
+            })
+        self.assertEqual(response.status_code, 302)  # saved, not re-shown with errors
+        quote = Quote.objects.get()
+        [alert] = self.alerts()
+        self.assertIn(quote.quote_number, alert.subject)
+        html = alert.alternatives[0][0]
+        self.assertIn('Walk-in Customer', html)
+        self.assertIn(f'{quote.total:,.2f}', html)  # totals were in place when it was sent
+        self.assertGreater(quote.total, 0)
+
+    def test_a_quote_created_in_code_alerts_staff(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            Quote.objects.create(guest_name='Phone Order', status=Quote.SUBMITTED)
+        self.assertEqual(len(self.alerts()), 1)
+
+    def test_drafts_do_not_alert_until_submitted_and_then_only_once(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            quote = Quote.objects.create(guest_name='Ada', status=Quote.DRAFT)
+            quote.save()
+        self.assertEqual(self.alerts(), [])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            Quote.objects.get(pk=quote.pk).transition_to(Quote.SUBMITTED)
+        self.assertEqual(len(self.alerts()), 1)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            reloaded = Quote.objects.get(pk=quote.pk)
+            reloaded.transition_to(Quote.IN_REVIEW)
+            reloaded.staff_notes = 'Called them.'
+            reloaded.save()
+        self.assertEqual(len(self.alerts()), 1)
+
+    def test_abandoned_drafts_expiring_do_not_alert(self):
+        quote = Quote.objects.create(status=Quote.DRAFT)
+        with self.captureOnCommitCallbacks(execute=True):
+            quote.transition_to(Quote.EXPIRED)
+        self.assertEqual(self.alerts(), [])
+
+    def test_demo_data_does_not_flood_the_inbox(self):
+        from main.signals import new_quote_alerts_suppressed
+
+        with self.captureOnCommitCallbacks(execute=True), new_quote_alerts_suppressed():
+            for _ in range(3):
+                Quote.objects.create(guest_name='Demo', status=Quote.SUBMITTED)
+        self.assertEqual(self.alerts(), [])
+
+
+class StaffQuoteBoardTests(TestCase):
+    """Approving lands a quote in the Approved column with the approver named."""
+
+    def setUp(self):
+        category = ServiceCategory.objects.create(name='Banners', slug='banners')
+        self.staff = User.objects.create_user(
+            'charlie', 'charlie@example.com', 'pw', is_staff=True, first_name='Charlie', last_name='N'
+        )
+        self.quote = Quote.objects.create(
+            guest_name='Ada', guest_email='ada@example.com', status=Quote.SUBMITTED
+        )
+        QuoteItem.objects.create(
+            quote=self.quote, category=category, description='Banner',
+            quantity=1, unit_price=Decimal('280'),
+        )
+        self.quote.recalculate()
+        self.client.force_login(self.staff)
+
+    def board(self):
+        response = self.client.get(reverse('staff_quote_inbox'))
+        return {key: quotes for key, _, quotes in response.context['board']}, response
+
+    def test_approve_and_send_lands_in_approved_with_the_approver_named(self):
+        self.client.post(
+            reverse('staff_quote_transition', args=[self.quote.pk]), {'status': 'APPROVE_AND_SEND'}
+        )
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.status, Quote.SENT)  # the customer's accept link needs SENT
+        self.assertEqual(self.quote.approved_by, self.staff)
+        self.assertIsNotNone(self.quote.approved_at)
+
+        columns, response = self.board()
+        self.assertIn(self.quote, columns[Quote.APPROVED])
+        self.assertNotIn(Quote.SENT, columns)
+        self.assertContains(response, 'Approved by Charlie N')
+        self.assertContains(response, 'awaiting customer')
+
+    def test_a_later_edit_does_not_change_who_approved_it(self):
+        self.client.post(
+            reverse('staff_quote_transition', args=[self.quote.pk]), {'status': 'APPROVE_AND_SEND'}
+        )
+        other = User.objects.create_user('sam', 'sam@example.com', 'pw', is_staff=True)
+        self.quote.refresh_from_db()
+        self.quote.transition_to(Quote.IN_REVIEW, user=other)
+        self.assertEqual(self.quote.reviewed_by, other)
+        self.assertEqual(self.quote.approved_by, self.staff)
+
+    def test_staff_can_delete_a_quote_and_its_register_entry_survives(self):
+        invoice = Invoice.objects.create(quote=self.quote, client_name='Ada', invoice_amount=Decimal('322'))
+        response = self.client.post(reverse('staff_quote_delete', args=[self.quote.pk]), follow=True)
+        self.assertFalse(Quote.objects.filter(pk=self.quote.pk).exists())
+        self.assertFalse(QuoteItem.objects.exists())
+        invoice.refresh_from_db()
+        self.assertIsNone(invoice.quote)
+        self.assertContains(response, 'register entry was kept')
+
+    def test_deleting_needs_staff_and_a_post(self):
+        url = reverse('staff_quote_delete', args=[self.quote.pk])
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.client.force_login(User.objects.create_user('cust', 'c@example.com', 'pw'))
+        self.client.post(url)
+        self.assertTrue(Quote.objects.filter(pk=self.quote.pk).exists())
 
 
 @override_settings(STAFF_NOTIFY_EMAILS=['inkpro@ahliki.com'])
@@ -600,10 +736,11 @@ class CustomerBriefTests(TestCase):
         )
         self.assertEqual(QuoteItem.objects.get().customer_brief, 'Logo on the left, phone number big')
 
-        self.client.post(
-            reverse('quote_review'),
-            {'guest_name': 'Ada', 'guest_email': 'ada@example.com', 'guest_phone': '1'},
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(
+                reverse('quote_review'),
+                {'guest_name': 'Ada', 'guest_email': 'ada@example.com', 'guest_phone': '1'},
+            )
         staff = next(m for m in mail.outbox if m.to == ['inkpro@ahliki.com'])
         self.assertIn('phone number big', staff.alternatives[0][0])
 

@@ -344,6 +344,16 @@ class Quote(models.Model):
         related_name='reviewed_quotes',
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
+    # Separate from reviewed_by, which follows whoever last edited the quote:
+    # this records who signed off the version the customer was sent.
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='approved_quotes',
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     responded_at = models.DateTimeField(null=True, blank=True)
     valid_until = models.DateField(null=True, blank=True)
@@ -374,11 +384,23 @@ class Quote(models.Model):
 
     objects = QuoteQuerySet.as_manager()
 
+    #: Status as last loaded from or saved to the database; None for a quote
+    #: not saved yet. Lets the new-quote alert (main.signals) tell "just became
+    #: a real request" apart from any other save.
+    _saved_status = None
+
     class Meta:
         ordering = ['-created_at']
 
     def __str__(self):
         return self.quote_number or f'Quote #{self.pk}'
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        if 'status' in field_names:
+            instance._saved_status = instance.status
+        return instance
 
     def save(self, *args, **kwargs):
         if not self.quote_number:
@@ -487,6 +509,12 @@ class Quote(models.Model):
             if user is not None and user.is_authenticated:
                 self.reviewed_by = user
                 fields.append('reviewed_by')
+        if new_status == self.APPROVED:
+            self.approved_at = now
+            fields.append('approved_at')
+            if user is not None and user.is_authenticated:
+                self.approved_by = user
+                fields.append('approved_by')
         if new_status == self.SENT:
             self.sent_at = now
             fields.append('sent_at')
