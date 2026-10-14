@@ -15,6 +15,7 @@
     <p class="mt-1 text-xs text-white/35">
       Submitted {{ quote.submitted_at|date:"j M Y, g:ia"|default:"—" }}
       {% if quote.reviewed_by %}· reviewed by {{ quote.reviewed_by.username }}{% endif %}
+      {% if quote.approved_by %}· <span class="text-green-300/80">✓ approved by {{ quote.approved_by.get_full_name|default:quote.approved_by.username }}{% if quote.approved_at %} {{ quote.approved_at|date:"j M Y" }}{% endif %}</span>{% endif %}
       {% if quote.sent_at %}· sent {{ quote.sent_at|date:"j M Y" }}{% endif %}
       {% if quote.responded_at %}· {{ quote.get_status_display|lower }} {{ quote.responded_at|date:"j M Y, g:ia" }}{% endif %}
     </p>
@@ -199,7 +200,7 @@
         Permanently removes this quote, its line items and stored PDF. The customer's link stops working.{% if quote.invoices.exists %} Register entries are kept but no longer linked to it.{% endif %}
       </p>
       <form method="post" action="{% url 'staff_quote_delete' quote.pk %}" class="mt-4"
-            onsubmit="return confirm('Delete {{ quote.quote_number }} permanently? This cannot be undone.')">
+            onsubmit="return confirm('Delete {{ quote.quote_number|escapejs }} permanently? This cannot be undone.')">
         {% csrf_token %}
         <button type="submit" class="w-full rounded-full border border-red-400/50 px-4 py-2.5 text-sm font-bold text-red-300 transition hover:bg-red-500/20 hover:text-red-100">Delete quote</button>
       </form>

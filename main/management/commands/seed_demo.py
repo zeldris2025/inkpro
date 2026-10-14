@@ -38,6 +38,13 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
+        from main.signals import new_quote_alerts_suppressed
+
+        # Dozens of invented quotes must not each email the office.
+        with new_quote_alerts_suppressed():
+            return self._seed(*args, **options)
+
+    def _seed(self, *args, **options):
         if not settings.DEBUG and not options['force']:
             raise CommandError('Refusing to seed demo data with DEBUG off. Pass --force if you mean it.')
 

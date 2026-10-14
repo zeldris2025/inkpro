@@ -76,8 +76,15 @@ def dashboard(request):
 
 #: Kanban columns, left to right. Accepted and declined sit at the end so the
 #: team can see answers come in and reopen a quote for a revised send.
+#: "Approve & send" ends on SENT (the status the customer's accept link needs),
+#: so Approved and Sent share a column: an approved quote stays where staff
+#: expect it, with each card saying whether it has gone out yet.
 BOARD_COLUMNS = [
-    Quote.SUBMITTED, Quote.IN_REVIEW, Quote.APPROVED, Quote.SENT, Quote.ACCEPTED, Quote.DECLINED,
+    (Quote.SUBMITTED, 'Submitted', [Quote.SUBMITTED]),
+    (Quote.IN_REVIEW, 'In review', [Quote.IN_REVIEW, Quote.REVISED]),
+    (Quote.APPROVED, 'Approved', [Quote.APPROVED, Quote.SENT]),
+    (Quote.ACCEPTED, 'Accepted', [Quote.ACCEPTED]),
+    (Quote.DECLINED, 'Declined', [Quote.DECLINED]),
 ]
 
 
@@ -86,7 +93,9 @@ def quote_inbox(request):
     """Filterable list / kanban of everything in the pipeline."""
     status = request.GET.get('status', '')
     search = request.GET.get('q', '').strip()
-    quotes = Quote.objects.exclude(status=Quote.DRAFT).select_related('customer', 'reviewed_by')
+    quotes = Quote.objects.exclude(status=Quote.DRAFT).select_related(
+        'customer', 'reviewed_by', 'approved_by'
+    )
     if status:
         quotes = quotes.filter(status=status)
     if search:
@@ -97,20 +106,22 @@ def quote_inbox(request):
             | Q(customer__company_name__icontains=search)
         )
 
-    board = {
-        key: list(
-            Quote.objects.filter(status=key).select_related('customer')[:25]
+    board = [
+        (
+            key,
+            label,
+            list(
+                Quote.objects.filter(status__in=statuses).select_related('customer', 'approved_by')[:25]
+            ),
         )
-        for key in BOARD_COLUMNS
-    }
+        for key, label, statuses in BOARD_COLUMNS
+    ]
     return render(
         request,
         'main/staff/quote_inbox.html',
         {
             'quotes': quotes[:200],
-            'board': [
-                (key, dict(Quote.STATUS_CHOICES)[key], board[key]) for key in BOARD_COLUMNS
-            ],
+            'board': board,
             'status': status,
             'search': search,
             'statuses': Quote.STATUS_CHOICES,
@@ -303,6 +314,33 @@ def _approve_and_send(request, quote):
 
 
 @staff_required
+@require_POST
+def quote_delete(request, pk):
+    """Delete a quote, its lines and its files. Register entries are kept.
+
+    An accepted quote has usually opened a register entry; the money record
+    must outlive the quote, so the entry stays (Invoice.quote is SET_NULL) and
+    the staff member is told so.
+    """
+    quote = get_object_or_404(Quote, pk=pk)
+    number = quote.quote_number
+    kept = quote.invoices.count()
+    files = [quote.pdf_file] + [item.artwork for item in quote.items.all()]
+    quote.delete()
+    for stored in files:
+        if stored:
+            try:
+                stored.delete(save=False)
+            except Exception:  # a missing file must not undo the delete
+                pass
+    message = f'Quote {number} deleted.'
+    if kept:
+        message += f' Its register entr{"y was" if kept == 1 else "ies were"} kept.'
+    messages.success(request, message)
+    return redirect('staff_quote_inbox')
+
+
+@staff_required
 def quote_pdf(request, pk):
     """Stream the quote document: inline to preview, or ``?download=1`` to save it."""
     from .pdf import render_quote_pdf
@@ -313,24 +351,6 @@ def quote_pdf(request, pk):
     disposition = 'attachment' if request.GET.get('download') else 'inline'
     response['Content-Disposition'] = f'{disposition}; filename="{filename}"'
     return response
-
-
-@staff_required
-@require_POST
-def quote_delete(request, pk):
-    """Delete a quote outright. Register entries are kept, just unlinked from it."""
-    quote = get_object_or_404(Quote, pk=pk)
-    number = quote.quote_number
-    stored_files = [quote.pdf_file] + [item.artwork for item in quote.items.all()]
-    quote.delete()
-    for stored in stored_files:
-        if stored:
-            try:
-                stored.delete(save=False)
-            except Exception:
-                pass  # An orphaned file in storage is harmless; the quote is gone.
-    messages.success(request, f'Quote {number} deleted.')
-    return redirect('staff_quote_inbox')
 
 
 # --- finance register -------------------------------------------------------
