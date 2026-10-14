@@ -315,6 +315,24 @@ def quote_pdf(request, pk):
     return response
 
 
+@staff_required
+@require_POST
+def quote_delete(request, pk):
+    """Delete a quote outright. Register entries are kept, just unlinked from it."""
+    quote = get_object_or_404(Quote, pk=pk)
+    number = quote.quote_number
+    stored_files = [quote.pdf_file] + [item.artwork for item in quote.items.all()]
+    quote.delete()
+    for stored in stored_files:
+        if stored:
+            try:
+                stored.delete(save=False)
+            except Exception:
+                pass  # An orphaned file in storage is harmless; the quote is gone.
+    messages.success(request, f'Quote {number} deleted.')
+    return redirect('staff_quote_inbox')
+
+
 # --- finance register -------------------------------------------------------
 #: Register order, top to bottom: what still needs chasing comes first.
 PAYMENT_ORDER = [Invoice.NOT_PAID, Invoice.PARTIAL, Invoice.TBC, Invoice.PAID]

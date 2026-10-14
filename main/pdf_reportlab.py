@@ -192,9 +192,9 @@ def render(context, logo=None) -> bytes:
     story += [meta, Spacer(1, 26)]
 
     # -- line items ---------------------------------------------------------
-    col_widths = [width * f for f in (0.40, 0.20, 0.12, 0.14, 0.14)]
-    headings = ['DESCRIPTION', 'SIZE', 'AREA' if all_sized else 'QTY / AREA',
-                'RATE / M²' if all_sized else 'RATE', 'TOTAL']
+    # No rate column: customers see sizes and totals, never the per-m² or unit rate.
+    col_widths = [width * f for f in (0.46, 0.22, 0.14, 0.18)]
+    headings = ['DESCRIPTION', 'SIZE', 'AREA' if all_sized else 'QTY / AREA', 'TOTAL']
     rows = [[Paragraph(h, th) for h in headings]]
     for item in items:
         description = [Paragraph(_text(item.description), cell_b)]
@@ -216,21 +216,16 @@ def render(context, logo=None) -> bytes:
             area = [Paragraph(f'{item.area_label} m²', cell_r)]
             if item.quantity != 1:
                 area.append(Paragraph(f'× {item.quantity}', sub_r))
-            rate = [Paragraph(_money(item.rate), cell_r)]
         else:
             area = [Paragraph(str(item.quantity), cell_r)]
-            rate = [Paragraph(_money(item.unit_price), cell_r)]
-            if not all_sized:
-                rate.append(Paragraph('each', sub_r))
         rows.append([
             description,
             Paragraph(_text(item.size or '—'), cell),
             area,
-            rate,
             Paragraph(_money(item.line_total), cell_br),
         ])
     if not items:
-        rows.append([Paragraph('No line items.', style('none', textColor=MUTED)), '', '', '', ''])
+        rows.append([Paragraph('No line items.', style('none', textColor=MUTED)), '', '', ''])
 
     table_style = [
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),

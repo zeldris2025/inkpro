@@ -77,10 +77,10 @@ block, before the document body returns to the left margin.{% endcomment %}
 
 <table class="items">
   <thead><tr>
-    <th style="width:40%;">Description</th><th style="width:20%;">Size</th>
-    <th class="right" style="width:12%;">{% if all_sized %}Area{% else %}Qty / Area{% endif %}</th>
-    <th class="right" style="width:14%;">{% if all_sized %}Rate / m²{% else %}Rate{% endif %}</th>
-    <th class="right" style="width:14%;">Total</th>
+    {% comment %}No rate column: customers see sizes and totals, never the per-m² or unit rate.{% endcomment %}
+    <th style="width:46%;">Description</th><th style="width:22%;">Size</th>
+    <th class="right" style="width:14%;">{% if all_sized %}Area{% else %}Qty / Area{% endif %}</th>
+    <th class="right" style="width:18%;">Total</th>
   </tr></thead>
   <tbody>
     {% for item in items %}
@@ -90,14 +90,12 @@ block, before the document body returns to the left margin.{% endcomment %}
       <td>{{ item.size|default:"—" }}</td>
       {% if item.area_label %}
       <td class="right">{{ item.area_label }} m²{% if item.quantity != 1 %}<div class="sub">× {{ item.quantity }}</div>{% endif %}</td>
-      <td class="right">${{ item.rate|floatformat:2|intcomma }}</td>
       {% else %}
       <td class="right">{{ item.quantity }}</td>
-      <td class="right">${{ item.unit_price|floatformat:2|intcomma }}{% if not all_sized %}<div class="sub">each</div>{% endif %}</td>
       {% endif %}
       <td class="right"><strong>${{ item.line_total|floatformat:2|intcomma }}</strong></td>
     </tr>
-    {% empty %}<tr><td colspan="5" class="muted">No line items.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="4" class="muted">No line items.</td></tr>{% endfor %}
   </tbody>
 </table>
 

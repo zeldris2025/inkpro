@@ -90,6 +90,7 @@ urlpatterns = [
     path('staff/quotes/<int:pk>/add-item/', views_staff.quote_add_item, name='staff_quote_add_item'),
     path('staff/quotes/<int:pk>/transition/', views_staff.quote_transition, name='staff_quote_transition'),
     path('staff/quotes/<int:pk>/pdf/', views_staff.quote_pdf, name='staff_quote_pdf'),
+    path('staff/quotes/<int:pk>/delete/', views_staff.quote_delete, name='staff_quote_delete'),
     path('staff/register/', views_staff.register, name='staff_register'),
     path('staff/register/import/', views_staff.register_import, name='staff_register_import'),
     path('staff/register/import/template.csv', views_staff.register_import_template, name='staff_register_import_template'),

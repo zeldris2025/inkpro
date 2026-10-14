@@ -580,6 +580,28 @@ class QuoteResponseAndRevisionTests(TestCase):
         self.assertContains(detail, 'GRAND OPENING')
         self.assertIn('GRAND OPENING', render_quote_html(self.quote))
 
+    def test_staff_can_delete_a_quote_and_keep_its_register_entry(self):
+        self.respond('accept')
+        invoice = Invoice.objects.get(quote=self.quote)
+        self.client.force_login(self.staff)
+        detail = self.client.get(reverse('staff_quote_detail', args=[self.quote.pk]))
+        self.assertContains(detail, reverse('staff_quote_delete', args=[self.quote.pk]))
+
+        delete_url = reverse('staff_quote_delete', args=[self.quote.pk])
+        self.assertEqual(self.client.get(delete_url).status_code, 405)
+        response = self.client.post(delete_url)
+        self.assertRedirects(response, reverse('staff_quote_inbox'))
+        self.assertFalse(Quote.objects.filter(pk=self.quote.pk).exists())
+        self.assertFalse(QuoteItem.objects.filter(pk=self.item.pk).exists())
+        invoice.refresh_from_db()
+        self.assertIsNone(invoice.quote)
+
+    def test_customers_cannot_delete_quotes(self):
+        customer = User.objects.create_user('cust', 'c@example.com', 'pw')
+        self.client.force_login(customer)
+        self.client.post(reverse('staff_quote_delete', args=[self.quote.pk]))
+        self.assertTrue(Quote.objects.filter(pk=self.quote.pk).exists())
+
 
 class CustomerBriefTests(TestCase):
     def setUp(self):
@@ -2909,7 +2931,7 @@ class ManualQuoteTests(TestCase):
         for expected in (
             'Vodafone Samoa Ltd', '17 shopfront signs across Upolu',
             'Shop Signage — Apolima Store', 'Location: Mulifanua Wharf', '4m × 1.2m', '4.8 m²',
-            'Rate / m²', '$100.00', '$480.00', '6.96 m²', '$696.00',
+            '$480.00', '6.96 m²', '$696.00',
             '9.1m × 1m (front) + 5.6m × 1m (right side)', '9.1 m²', '$910.00',
             'Subtotal (special rate)', '$10,916.00', 'GST (15%)', '$1,637.40', '$12,553.40',
             'Special rate applied.', '$115.00 incl. GST', '$140.00 per m²',
@@ -2919,6 +2941,19 @@ class ManualQuoteTests(TestCase):
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, html)
+
+    def test_customers_never_see_a_rate_column(self):
+        from main.pdf import render_quote_html
+
+        self.post_vodafone(normal_rate='')
+        quote = Quote.objects.get()
+        html = render_quote_html(quote)
+        self.assertNotIn('Rate / m²', html)
+        self.assertNotIn('$100.00', html)
+        Quote.objects.filter(pk=quote.pk).update(status=Quote.SENT)
+        public = self.client.get(reverse('public_quote', args=[quote.access_token]))
+        self.assertContains(public, '$480.00')
+        self.assertNotContains(public, '$100.00')
 
     def test_no_special_rate_block_without_a_normal_rate(self):
         from main.pdf import render_quote_html

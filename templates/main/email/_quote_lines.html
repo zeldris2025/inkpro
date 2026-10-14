@@ -9,7 +9,7 @@
       <tr>
         <td style="color:#18181b;">
           <strong>{{ item.description }}</strong>
-          <div style="color:#a1a1aa;font-size:12px;margin-top:2px;">{% if item.size %}{{ item.size }} · {% endif %}Qty {{ item.quantity }} @ ${{ item.unit_price|floatformat:2|intcomma }}</div>
+          <div style="color:#a1a1aa;font-size:12px;margin-top:2px;">{% if item.size %}{{ item.size }} · {% endif %}Qty {{ item.quantity }}</div>
           {% if item.customer_brief %}<div style="color:#52525b;font-size:12px;margin-top:6px;padding-left:8px;border-left:2px solid #FFD200;">{{ item.customer_brief|linebreaksbr }}</div>{% endif %}
         </td>
         <td align="right" style="font-weight:700;color:#18181b;white-space:nowrap;padding-left:12px;">${{ item.line_total|floatformat:2|intcomma }}</td>
