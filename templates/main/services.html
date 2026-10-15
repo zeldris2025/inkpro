@@ -6,7 +6,7 @@
   <div class="relative mx-auto max-w-7xl px-4 sm:px-6">
     <span class="text-xs font-bold uppercase tracking-[0.3em] text-ink-yellow">Rate card</span>
     <h1 class="mt-4 font-display text-5xl leading-none sm:text-7xl">Everything we print,<br><span class="text-ink-yellow">priced up front.</span></h1>
-    <p class="mt-6 max-w-2xl text-lg text-white/60">All prices are in <strong class="text-white">Samoan Tala ({{ CURRENCY_CODE }})</strong> and exclude GST unless marked. GST is charged at {{ GST_RATE_PCT }}%. Size-based work is priced per square metre — rate × size + GST.</p>
+    <p class="mt-6 max-w-2xl text-lg text-white/60">All prices are in <strong class="text-white">Samoan Tala ({{ CURRENCY_CODE }})</strong> and <strong class="text-white">include GST</strong> — the price you see is the price you pay. Size-based work is priced per square metre — rate × size.</p>
     <a href="{% url 'quote_builder' %}" class="ink-btn mt-8">Build a quote</a>
   </div>
 </section>
@@ -49,8 +49,7 @@
                 <tr>
                   <th class="px-4 py-3 font-bold">Option</th>
                   <th class="px-4 py-3 font-bold">Unit</th>
-                  <th class="px-4 py-3 text-right font-bold">Normal</th>
-                  <th class="px-4 py-3 text-right font-bold">Incl. GST</th>
+                  <th class="px-4 py-3 text-right font-bold">Price <span class="font-normal normal-case tracking-normal text-white/35">incl. GST</span></th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-white/5">
@@ -63,9 +62,6 @@
                   </td>
                   <td class="px-4 py-3 text-white/50">{{ rule.unit_label }}</td>
                   <td class="px-4 py-3 text-right font-bold tabular text-ink-yellow">{{ rule.price_range_label }}</td>
-                  <td class="px-4 py-3 text-right tabular text-white/60">
-                    {% if rule.pricing_type == 'PER_UNIT_RANGE' %}—{% else %}${{ rule.display_price_inc_gst|floatformat:2|intcomma }}{% endif %}
-                  </td>
                 </tr>
                 {% endfor %}
               </tbody>

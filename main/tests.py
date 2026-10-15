@@ -104,7 +104,16 @@ class CatalogueTests(TestCase):
             category=self.category, name='1m x 1m', base_price=140
         )
         self.assertFalse(rule.requires_dimensions)
+        # GST-inclusive by default: the card price is the price.
+        self.assertEqual(rule.display_price_inc_gst, Decimal('140.00'))
+        self.assertEqual(rule.price_range_label, '$140.00')
+
+    def test_a_rule_can_still_have_gst_added_on_top(self):
+        rule = PricingRule.objects.create(
+            category=self.category, name='Trade', base_price=140, gst_inclusive=False
+        )
         self.assertEqual(rule.display_price_inc_gst, Decimal('161.00'))
+        self.assertEqual(rule.price_range_label, '$140.00 + GST')
 
     def test_price_from_reports_the_cheapest_active_option(self):
         PricingRule.objects.create(category=self.category, name='A', base_price=140)
@@ -114,10 +123,12 @@ class CatalogueTests(TestCase):
 
 
 class QuoteTotalsTests(TestCase):
+    """The GST-exclusive engine behind every quote, priced from an ex-GST rule."""
+
     def setUp(self):
         self.category = ServiceCategory.objects.create(name='Banners', slug='banners')
         self.rule = PricingRule.objects.create(
-            category=self.category, name='2m x 1m', base_price=Decimal('280')
+            category=self.category, name='2m x 1m', base_price=Decimal('280'), gst_inclusive=False
         )
         self.quote = Quote.objects.create(guest_name='Ada', guest_email='ada@example.com')
 
@@ -182,6 +193,69 @@ class QuoteTotalsTests(TestCase):
             width_m=Decimal('2.5'), height_m=Decimal('1'), quantity=1, unit_price=Decimal('350'),
         )
         self.assertEqual(item.size, '2.5m × 1m')
+
+
+class GstInclusivePricingTests(TestCase):
+    """Customers pay the card price: GST is inside it, never added on top."""
+
+    def setUp(self):
+        self.category = ServiceCategory.objects.create(name='Banners', slug='banners')
+        self.flat = PricingRule.objects.create(
+            category=self.category, name='2m x 1m', base_price=Decimal('280')
+        )
+        self.per_m2 = PricingRule.objects.create(
+            category=self.category, name='Custom', pricing_type=PricingRule.PER_METER,
+            base_price=Decimal('140'),
+        )
+        UrgentFee.objects.create(min_amount=Decimal('50'), max_amount=Decimal('100'))
+
+    def build(self, rule, quantity, **size):
+        self.client.post(
+            reverse('quote_configure', args=['banners']),
+            {'pricing_rule': rule.pk, 'quantity': quantity, **size},
+        )
+        return Quote.objects.get(status=Quote.DRAFT)
+
+    def test_totals_match_the_card_to_the_cent(self):
+        # Quantities where "strip GST per unit, add it back" would drift a cent.
+        for quantity in (1, 3, 7, 13):
+            with self.subTest(quantity=quantity):
+                Quote.objects.all().delete()
+                self.client.session.flush()
+                quote = self.build(self.flat, quantity)
+                self.assertEqual(quote.total, Decimal('280') * quantity)
+                self.assertEqual(quote.subtotal + quote.gst_amount, quote.total)
+
+    def test_area_pricing_is_rate_times_size_with_gst_inside(self):
+        quote = self.build(self.per_m2, 1, width_m='2.5', height_m='1.2')
+        self.assertEqual(quote.total, Decimal('420.00'))  # $140 x 3 m²
+        self.assertEqual(quote.gst_amount, Decimal('54.78'))
+
+    def test_the_rush_fee_is_the_advertised_amount(self):
+        self.build(self.flat, 1)
+        self.client.post(reverse('quote_review'), {
+            'guest_name': 'Ada', 'guest_email': 'ada@example.com', 'guest_phone': '1', 'is_urgent': 'on',
+        })
+        quote = Quote.objects.get()
+        self.assertEqual(quote.total, Decimal('330.00'))  # $280 + $50
+
+    def test_the_customer_sees_gst_inclusive_figures(self):
+        self.build(self.flat, 2)
+        summary = self.client.get(reverse('quote_summary'))
+        self.assertContains(summary, '$560.00')
+        self.assertContains(summary, 'Includes GST')
+        self.assertNotContains(summary, '$486.96')  # the ex-GST line
+
+        probe = self.client.get(reverse('price_probe'), {'pricing_rule': self.flat.pk, 'quantity': 2})
+        self.assertContains(probe, '$560.00')
+        self.assertContains(probe, 'Includes $73.04 GST')
+
+    def test_the_rate_card_pages_say_gst_is_included(self):
+        services = self.client.get(reverse('services'))
+        self.assertContains(services, 'include GST')
+        self.assertNotContains(services, 'exclude GST')
+        self.assertContains(services, '$280.00')
+        self.assertNotContains(services, '$322.00')
 
 
 class QuoteTransitionTests(TestCase):
@@ -288,7 +362,8 @@ class QuoteWizardFlowTests(TestCase):
         self.assertRedirects(add, reverse('quote_review'))
 
         quote = Quote.objects.get(status=Quote.DRAFT)
-        self.assertEqual(quote.total, Decimal('644.00'))
+        # Card prices include GST: two $280 banners are $560, not $560 + GST.
+        self.assertEqual(quote.total, Decimal('560.00'))
 
         with self.captureOnCommitCallbacks(execute=True):
             submit = self.client.post(
@@ -303,8 +378,9 @@ class QuoteWizardFlowTests(TestCase):
             )
         quote.refresh_from_db()
         self.assertEqual(quote.status, Quote.SUBMITTED)
-        self.assertEqual(quote.urgent_fee, Decimal('50.00'))
-        self.assertEqual(quote.total, Decimal('701.50'))
+        # The $50 rush fee is GST-inclusive too; stored ex-GST like other amounts.
+        self.assertEqual(quote.urgent_fee_inc_gst, Decimal('50.00'))
+        self.assertEqual(quote.total, Decimal('610.00'))
         self.assertRedirects(submit, reverse('quote_submitted', args=[quote.access_token]))
         # Customer acknowledgement and the staff alert both go out.
         self.assertEqual(len(mail.outbox), 2)
@@ -824,8 +900,10 @@ class PublicPageTests(TestCase):
         rule = PricingRule.objects.get(name='2m x 1m')
         response = self.client.get(reverse('api_rule_price'), {'rule': rule.pk, 'quantity': 2})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['line_total'], 560.0)
-        self.assertEqual(response.json()['inc_gst'], 644.0)
+        # Two $280 banners at the GST-inclusive card price.
+        self.assertEqual(response.json()['inc_gst'], 560.0)
+        self.assertEqual(response.json()['line_total'], 486.96)
+        self.assertEqual(response.json()['gst'], 73.04)
 
     def test_live_price_endpoint_handles_an_unknown_rule(self):
         self.assertEqual(
@@ -1413,18 +1491,18 @@ class RateCardFidelityTests(TestCase):
             with self.subTest(rule=f'{slug}/{name}'):
                 self.assertEqual(self.rule(slug, name).base_price, Decimal(price))
 
-    def test_gst_column_matches_the_printed_card(self):
-        # The card prints both a "Normal" and a "GST" price for each tier.
-        for slug, name, inc_gst in [
-            ('banner-prints', '1m x 1m', '161.00'),
-            ('banner-prints', '2m x 1m', '322.00'),
-            ('banner-prints', '3m x 1m', '483.00'),
-            ('sticker-prints', '1m x 1m', '184.00'),
-            ('sticker-prints', '2m x 1m', '368.00'),
-            ('sticker-prints', '3m x 1m', '552.00'),
+    def test_card_prices_are_the_final_gst_inclusive_price(self):
+        # The card also prints a "GST" figure for banners and stickers, but
+        # InkPro charges the listed price with GST already in it.
+        for slug, name, price in [
+            ('banner-prints', '2m x 1m', '280.00'),
+            ('sticker-prints', '3m x 1m', '480.00'),
+            ('pull-up-banners', '850mm x 2m', '450.00'),
         ]:
             with self.subTest(rule=f'{slug}/{name}'):
-                self.assertEqual(self.rule(slug, name).display_price_inc_gst, Decimal(inc_gst))
+                rule = self.rule(slug, name)
+                self.assertTrue(rule.gst_inclusive)
+                self.assertEqual(rule.display_price_inc_gst, Decimal(price))
 
     def test_ranged_decal_prices_match_the_card(self):
         small = self.rule('vehicle-decals', 'Small decals')
@@ -3099,7 +3177,8 @@ class ManualQuoteTests(TestCase):
         self.assertNotIn('$100.00', html)
         Quote.objects.filter(pk=quote.pk).update(status=Quote.SENT)
         public = self.client.get(reverse('public_quote', args=[quote.access_token]))
-        self.assertContains(public, '$480.00')
+        # Customers see lines GST-inclusive: the $480 + GST sign is $552.
+        self.assertContains(public, '$552.00')
         self.assertNotContains(public, '$100.00')
 
     def test_no_special_rate_block_without_a_normal_rate(self):

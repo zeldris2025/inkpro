@@ -7,8 +7,8 @@
     <span class="font-display text-2xl text-ink-yellow tabular">${{ line_total|floatformat:2|intcomma }}</span>
   </div>
   <div class="mt-2 flex justify-between text-xs text-white/50 tabular">
-    <span>{{ quantity }} × ${{ unit_price|floatformat:2|intcomma }} {{ rule.unit_label }}</span>
-    <span>${{ inc_gst|floatformat:2|intcomma }} incl. GST</span>
+    <span>{{ quantity }} × ${{ unit_price|floatformat:2|intcomma }}{% if not rule.requires_dimensions %} {{ rule.unit_label }}{% endif %}</span>
+    <span>{% if rule.gst_inclusive %}Includes ${{ gst|floatformat:2|intcomma }} GST{% else %}+ ${{ gst|floatformat:2|intcomma }} GST{% endif %}</span>
   </div>
   {% if below_min_qty %}
   <p class="mt-3 text-xs font-bold text-ink-magenta">{{ rule.name }} has a minimum order of {{ rule.min_qty }} {{ rule.unit_label }}.</p>

@@ -154,6 +154,12 @@ def rule_price(request):
     unit = rule.unit_price(number('width_m'), number('height_m'))
     line = pricing.line_total(unit, quantity)
     gst = pricing.add_gst(line)
+    if rule.gst_inclusive:
+        # Card prices include GST: report the GST inside the listed figure, so
+        # inc_gst is exactly the card price times the quantity.
+        listed = pricing.line_total(rule.listed_price(number('width_m'), number('height_m')), quantity)
+        line = pricing.strip_gst(listed)
+        gst = listed - line
     return Response(
         {
             'rule': rule.name,

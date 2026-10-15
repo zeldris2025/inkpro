@@ -78,8 +78,8 @@ class ServiceCategory(models.Model):
 
     @property
     def price_from(self):
-        """Cheapest GST-exclusive starting price across this category's rules."""
-        prices = [r.display_price_ex_gst for r in self.pricing_rules.all() if r.is_active]
+        """Cheapest starting price across this category's rules, as customers pay it."""
+        prices = [r.display_price_inc_gst for r in self.pricing_rules.all() if r.is_active]
         return min(prices) if prices else None
 
 
@@ -151,7 +151,9 @@ class PricingRule(models.Model):
     unit_label = models.CharField(max_length=50, default='each', blank=True)
     min_qty = models.PositiveIntegerField(default=1)
     gst_inclusive = models.BooleanField(
-        default=False, help_text='Tick if base_price already includes GST.'
+        default=True,
+        help_text='Ticked when base_price already includes GST, as every rate card price '
+        'does. Untick to have GST added on top.',
     )
     requires_dimensions = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
@@ -167,6 +169,22 @@ class PricingRule(models.Model):
     def save(self, *args, **kwargs):
         self.requires_dimensions = self.pricing_type in (self.PER_METER, self.CUSTOM_SIZE_FORMULA)
         super().save(*args, **kwargs)
+
+    def listed_price(self, width_m=None, height_m=None) -> Decimal:
+        """Price for one unit exactly as the rate card lists it.
+
+        GST-inclusive when ``gst_inclusive`` is set (as every rate card price
+        is): this is what the customer pays, and what the quote builder
+        prices lines from so totals match the card to the cent.
+        """
+        return pricing.unit_price_for(
+            self.pricing_type,
+            self.base_price,
+            width_m=width_m,
+            height_m=height_m,
+            min_price=self.min_price,
+            max_price=self.max_price,
+        )
 
     def unit_price(self, width_m=None, height_m=None) -> Decimal:
         """GST-exclusive price for one unit under this rule."""
@@ -194,17 +212,23 @@ class PricingRule(models.Model):
 
     @property
     def display_price_inc_gst(self) -> Decimal:
+        if self.gst_inclusive:
+            # The card's own figure, not ex-GST plus GST, which can drift a cent.
+            if self.requires_dimensions:
+                return pricing.money(self.base_price)
+            return self.listed_price()
         ex = self.display_price_ex_gst
         return pricing.money(ex + pricing.add_gst(ex))
 
     @property
     def price_range_label(self) -> str:
-        """Human-readable price for the marketing tables ("$20 – $60")."""
+        """Human-readable price as the customer pays it ("$20 – $60", "$140 per m²")."""
+        suffix = '' if self.gst_inclusive else ' + GST'
         if self.pricing_type == self.PER_UNIT_RANGE and self.min_price and self.max_price:
-            return f'${self.min_price:,.0f} – ${self.max_price:,.0f}'
+            return f'${self.min_price:,.0f} – ${self.max_price:,.0f}{suffix}'
         if self.requires_dimensions:
-            return f'${self.display_price_ex_gst:,.0f} per m²'
-        return f'${self.display_price_ex_gst:,.2f}'
+            return f'${pricing.money(self.base_price):,.0f} per m²{suffix}'
+        return f'${self.listed_price():,.2f}{suffix}'
 
 
 class UrgentFee(models.Model):
@@ -510,6 +534,15 @@ class Quote(models.Model):
             )
         return self
 
+    # -- GST-inclusive figures, for what the customer sees -------------------
+    @property
+    def urgent_fee_inc_gst(self):
+        return pricing.money(self.urgent_fee + pricing.add_gst(self.urgent_fee))
+
+    @property
+    def discount_inc_gst(self):
+        return pricing.money(self.discount + pricing.add_gst(self.discount))
+
     def special_rate_summary(self):
         """The "special rate applied" figures for the quote document, or None.
 
@@ -682,6 +715,18 @@ class QuoteItem(models.Model):
 
     def __str__(self):
         return f'{self.description} x{self.quantity}'
+
+    @property
+    def amount_inc_gst(self):
+        """This line as the customer pays it, GST included."""
+        if self.total_inc_gst is not None:
+            return pricing.money(self.total_inc_gst)
+        return pricing.money(self.line_total + pricing.add_gst(self.line_total))
+
+    @property
+    def unit_price_inc_gst(self):
+        qty = Decimal(self.quantity or 1)
+        return pricing.money(self.amount_inc_gst / qty)
 
     def price_from_rule(self):
         """Unit price implied by the attached rule and this item's dimensions."""

@@ -55,9 +55,7 @@
           </div>
           <div class="text-right">
             <div class="font-display text-xl text-ink-yellow tabular">{{ rule.price_range_label }}</div>
-            {% if rule.pricing_type != 'PER_UNIT_RANGE' %}
-            <div class="text-xs text-white/40 tabular">${{ rule.display_price_inc_gst|floatformat:2 }} incl. GST</div>
-            {% endif %}
+            <div class="text-xs text-white/40">{% if rule.gst_inclusive %}GST included{% else %}+ GST{% endif %}</div>
           </div>
         </div>
         {% if rule.min_qty > 1 %}<p class="mt-3 text-xs font-bold uppercase tracking-wider text-ink-cyan">Minimum order {{ rule.min_qty }}</p>{% endif %}

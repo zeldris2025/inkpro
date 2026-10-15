@@ -12,6 +12,7 @@ from django.contrib.auth.forms import (
 )
 from django.contrib.auth.models import User
 
+from . import pricing
 from .models import Customer, Invoice, PricingRule, Quote, QuoteItem, ServiceCategory
 
 INPUT = (
@@ -117,7 +118,13 @@ class QuoteItemForm(forms.ModelForm):
         item.quote = quote
         item.category = rule.category
         item.description = f'{rule.category.name} — {rule.name}'
-        item.unit_price = rule.unit_price(item.width_m, item.height_m)
+        listed = rule.listed_price(item.width_m, item.height_m)
+        if rule.gst_inclusive:
+            # The customer pays the card price; GST is backed out of the line
+            # total (QuoteItem.save), so the quote adds up to the card exactly.
+            item.total_inc_gst = pricing.money(listed * (item.quantity or 0))
+        else:
+            item.unit_price = listed
         item.display_order = quote.items.count()
         if commit:
             item.save()

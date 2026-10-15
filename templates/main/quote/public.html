@@ -42,19 +42,19 @@
               {% if item.customer_brief %}<div class="mt-2 border-l-2 border-ink-yellow/60 pl-3 text-xs text-white/55">{{ item.customer_brief|linebreaksbr }}</div>{% endif %}
             </td>
             <td class="px-5 py-4 text-right tabular">{{ item.quantity }}</td>
-            <td class="px-5 py-4 text-right font-bold tabular">${{ item.line_total|floatformat:2|intcomma }}</td>
+            <td class="px-5 py-4 text-right font-bold tabular">${{ item.amount_inc_gst|floatformat:2|intcomma }}</td>
           </tr>
           {% endfor %}
         </tbody>
         <tfoot class="border-t border-white/10 text-sm">
-          <tr><td colspan="2" class="px-5 pt-4 text-right text-white/55">Subtotal</td><td class="px-5 pt-4 text-right tabular">${{ quote.subtotal|floatformat:2|intcomma }}</td></tr>
-          {% if quote.discount %}<tr><td colspan="2" class="px-5 py-1 text-right text-green-400">Discount</td><td class="px-5 py-1 text-right tabular text-green-400">−${{ quote.discount|floatformat:2|intcomma }}</td></tr>{% endif %}
-          {% if quote.urgent_fee %}<tr><td colspan="2" class="px-5 py-1 text-right text-ink-magenta">Urgency fee</td><td class="px-5 py-1 text-right tabular text-ink-magenta">${{ quote.urgent_fee|floatformat:2|intcomma }}</td></tr>{% endif %}
-          <tr><td colspan="2" class="px-5 py-1 text-right text-white/55">GST ({{ GST_RATE_PCT }}%)</td><td class="px-5 py-1 text-right tabular">${{ quote.gst_amount|floatformat:2|intcomma }}</td></tr>
+          {# GST-inclusive throughout, matching the prices on the card. #}
+          {% if quote.discount %}<tr><td colspan="2" class="px-5 pt-4 text-right text-green-400">Discount</td><td class="px-5 pt-4 text-right tabular text-green-400">−${{ quote.discount_inc_gst|floatformat:2|intcomma }}</td></tr>{% endif %}
+          {% if quote.urgent_fee %}<tr><td colspan="2" class="px-5 py-1 text-right text-ink-magenta">Rush fee</td><td class="px-5 py-1 text-right tabular text-ink-magenta">${{ quote.urgent_fee_inc_gst|floatformat:2|intcomma }}</td></tr>{% endif %}
           <tr class="border-t border-white/15">
-            <td colspan="2" class="px-5 py-4 text-right font-display text-lg">Total</td>
-            <td class="px-5 py-4 text-right font-display text-2xl text-ink-yellow tabular">${{ quote.total|floatformat:2|intcomma }}</td>
+            <td colspan="2" class="px-5 pt-4 text-right font-display text-lg">Total</td>
+            <td class="px-5 pt-4 text-right font-display text-2xl text-ink-yellow tabular">${{ quote.total|floatformat:2|intcomma }}</td>
           </tr>
+          <tr><td colspan="2" class="px-5 pb-4 text-right text-xs text-white/40">Includes GST ({{ GST_RATE_PCT }}%)</td><td class="px-5 pb-4 text-right text-xs tabular text-white/40">${{ quote.gst_amount|floatformat:2|intcomma }}</td></tr>
         </tfoot>
       </table>
     </div>

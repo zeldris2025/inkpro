@@ -216,7 +216,7 @@ def quote_review(request):
     form = QuoteSubmitForm(request.POST or None, instance=quote, user=request.user)
     if request.method == 'POST' and form.is_valid():
         quote = form.save(commit=False)
-        quote.urgent_fee = UrgentFee.default_amount() if quote.is_urgent else 0
+        quote.urgent_fee = rush_fee() if quote.is_urgent else 0
         if request.user.is_authenticated:
             quote.customer = getattr(request.user, 'customer', None)
         quote.save()
@@ -250,7 +250,7 @@ def quote_toggle_urgent(request):
     if not quote:
         return HttpResponseBadRequest('No draft quote in progress.')
     quote.is_urgent = request.POST.get('is_urgent') in ('on', 'true', '1')
-    quote.urgent_fee = UrgentFee.default_amount() if quote.is_urgent else 0
+    quote.urgent_fee = rush_fee() if quote.is_urgent else 0
     quote.save(update_fields=['is_urgent', 'urgent_fee', 'updated_at'])
     quote.recalculate()
     return render(request, 'main/quote/_summary.html', quote_context(quote))
@@ -263,6 +263,16 @@ def quote_summary_partial(request):
     )
 
 
+def rush_fee():
+    """The rush fee as stored on a quote: GST-exclusive.
+
+    The advertised fee is what the customer pays, GST included, like every
+    other price on the card, so GST is backed out here and added back when
+    the quote is totalled.
+    """
+    return pricing.strip_gst(UrgentFee.default_amount())
+
+
 def price_probe(request):
     """Live per-line price for the wizard, called as the fields change.
 
@@ -273,15 +283,20 @@ def price_probe(request):
     context = {'valid': False}
     if form.is_valid():
         rule = form.cleaned_data['pricing_rule']
-        unit = rule.unit_price(form.cleaned_data['width_m'], form.cleaned_data['height_m'])
+        unit = rule.listed_price(form.cleaned_data['width_m'], form.cleaned_data['height_m'])
         line = pricing.line_total(unit, form.cleaned_data['quantity'])
+        if rule.gst_inclusive:
+            inc_gst, gst = line, line - pricing.strip_gst(line)
+        else:
+            gst = pricing.add_gst(line)
+            inc_gst = pricing.money(line + gst)
         context = {
             'valid': True,
             'rule': rule,
             'unit_price': unit,
-            'line_total': line,
-            'gst': pricing.add_gst(line),
-            'inc_gst': pricing.money(line + pricing.add_gst(line)),
+            'line_total': inc_gst,
+            'gst': gst,
+            'inc_gst': inc_gst,
             'quantity': form.cleaned_data['quantity'],
             'below_min_qty': form.cleaned_data['quantity'] < rule.min_qty,
         }
@@ -461,6 +476,7 @@ def reorder_quote(request, pk):
             height_m=item.height_m,
             quantity=item.quantity,
             unit_price=item.unit_price,
+            total_inc_gst=item.total_inc_gst,
             display_order=draft.items.count(),
         )
     draft.recalculate()
