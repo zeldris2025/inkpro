@@ -79,7 +79,7 @@ block, before the document body returns to the left margin.{% endcomment %}
   <thead><tr>
     {% comment %}No rate column: customers see sizes and totals, never the per-m² or unit rate.{% endcomment %}
     <th style="width:46%;">Description</th><th style="width:22%;">Size</th>
-    <th class="right" style="width:14%;">{% if all_sized %}Area{% else %}Qty / Area{% endif %}</th>
+    <th class="right" style="width:14%;">{% if all_sized %}Area{% elif any_sized %}Qty / Area{% else %}Qty{% endif %}</th>
     <th class="right" style="width:18%;">Total</th>
   </tr></thead>
   <tbody>

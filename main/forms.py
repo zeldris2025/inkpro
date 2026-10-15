@@ -197,7 +197,7 @@ class StaffQuoteItemForm(forms.ModelForm):
         model = QuoteItem
         fields = [
             'description', 'customer_brief', 'size', 'width_m', 'height_m',
-            'rate_per_m2', 'quantity', 'unit_price',
+            'rate_per_m2', 'quantity', 'unit_price', 'total_inc_gst',
         ]
         widgets = {
             'description': forms.TextInput(attrs={'class': LIGHT_INPUT}),
@@ -211,6 +211,7 @@ class StaffQuoteItemForm(forms.ModelForm):
             'rate_per_m2': forms.NumberInput(attrs={'step': '0.01', 'min': '0', 'class': LIGHT_INPUT}),
             'quantity': forms.NumberInput(attrs={'min': 0, 'class': LIGHT_INPUT}),
             'unit_price': forms.NumberInput(attrs={'step': '0.01', 'class': LIGHT_INPUT}),
+            'total_inc_gst': forms.NumberInput(attrs={'step': '0.01', 'min': '0', 'class': LIGHT_INPUT}),
         }
 
 
@@ -305,13 +306,21 @@ class StaffManualQuoteForm(forms.ModelForm):
 
 
 class StaffManualLineForm(forms.ModelForm):
-    """One line of a staff-written quote: sized at a rate per m², or a fixed price."""
+    """One line of a staff-written quote.
+
+    Detailed lines are sized at a rate per m², or carry a unit price. A quick
+    quote (``quick=True``) needs only a description, a quantity and the
+    GST-inclusive total for the whole line; GST is backed out of that total.
+    """
+
+    #: Fields only a detailed line uses; a quick line clears them.
+    DETAILED_ONLY = ('category', 'width_m', 'height_m', 'size', 'rate_per_m2', 'unit_price')
 
     class Meta:
         model = QuoteItem
         fields = [
             'category', 'description', 'customer_brief', 'width_m', 'height_m', 'size',
-            'rate_per_m2', 'quantity', 'unit_price',
+            'rate_per_m2', 'quantity', 'unit_price', 'total_inc_gst',
         ]
         labels = {
             'customer_brief': 'Note',
@@ -321,6 +330,7 @@ class StaffManualLineForm(forms.ModelForm):
             'rate_per_m2': 'Rate / m²',
             'quantity': 'Qty',
             'unit_price': 'Unit price',
+            'total_inc_gst': 'Total (incl. GST)',
         }
         widgets = {
             'description': forms.TextInput(attrs={'placeholder': 'e.g. Shop Signage — Apolima Store'}),
@@ -333,18 +343,26 @@ class StaffManualLineForm(forms.ModelForm):
             'unit_price': forms.NumberInput(
                 attrs={'step': '0.01', 'min': '0', 'data-calc': 'unit', 'placeholder': 'If not sized'}
             ),
+            'total_inc_gst': forms.NumberInput(
+                attrs={'step': '0.01', 'min': '0', 'data-calc': 'total', 'placeholder': 'e.g. 1150.00'}
+            ),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, quick=False, **kwargs):
         super().__init__(*args, **kwargs)
+        self.quick = quick
         self.fields['category'].queryset = ServiceCategory.objects.filter(is_active=True)
         self.fields['category'].required = False
         self.fields['category'].empty_label = 'Custom work'
         self.fields['unit_price'].required = False
+        self.fields['total_inc_gst'].required = False
         style(self.fields, LIGHT_INPUT)
 
     def clean(self):
         cleaned = super().clean()
+        if self.quick:
+            return self._clean_quick(cleaned)
+        cleaned['total_inc_gst'] = None
         width, height = cleaned.get('width_m'), cleaned.get('height_m')
         rate, unit = cleaned.get('rate_per_m2'), cleaned.get('unit_price')
         if bool(width) != bool(height):
@@ -353,6 +371,18 @@ class StaffManualLineForm(forms.ModelForm):
             self.add_error('rate_per_m2', 'A rate per m² needs a width and height.')
         if rate is None and not unit:
             self.add_error('unit_price', 'Give a rate per m² (with a size) or a unit price.')
+        return cleaned
+
+    def _clean_quick(self, cleaned):
+        for name in self.DETAILED_ONLY:
+            cleaned[name] = None if name != 'size' else ''
+        if not cleaned.get('quantity'):
+            self.add_error('quantity', 'Enter a quantity of 1 or more.')
+        total = cleaned.get('total_inc_gst')
+        if total is None:
+            self.add_error('total_inc_gst', 'Enter the total for this line.')
+        elif total <= 0:
+            self.add_error('total_inc_gst', 'The total must be more than zero.')
         return cleaned
 
 

@@ -77,7 +77,12 @@
               <td class="py-2 pr-3">{{ item_form.height_m }}</td>
               <td class="py-2 pr-3">{{ item_form.rate_per_m2 }}</td>
               <td class="py-2 pr-3">{{ item_form.quantity }}</td>
-              <td class="py-2 pr-3">{{ item_form.unit_price }}</td>
+              {% if item_form.instance.total_inc_gst is not None %}
+              {% comment %}Quick-quote line: priced from its GST-inclusive total.{% endcomment %}
+              <td class="py-2 pr-3">{{ item_form.unit_price.as_hidden }}{{ item_form.total_inc_gst }}<span class="mt-1 block text-[10px] font-bold uppercase tracking-widest text-zinc-400">Total incl. GST</span></td>
+              {% else %}
+              <td class="py-2 pr-3">{{ item_form.unit_price }}{{ item_form.total_inc_gst.as_hidden }}</td>
+              {% endif %}
               <td class="py-2 pr-3 text-right font-bold tabular">${{ item_form.instance.line_total|floatformat:2|intcomma }}</td>
               <td class="py-2 text-center">{{ item_form.DELETE }}</td>
             </tr>

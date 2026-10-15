@@ -66,6 +66,7 @@ def quote_document_context(quote):
         # Area/rate headings when every line is sized; otherwise the columns
         # also carry quantities and unit prices.
         'all_sized': bool(items) and all(item.area_m2 > 0 for item in items),
+        'any_sized': any(item.area_m2 > 0 for item in items),
         'special': quote.special_rate_summary(),
         'gst_pct': plain_number(Decimal(str(settings.GST_RATE)) * 100),
         'valid_days': _valid_days(quote),

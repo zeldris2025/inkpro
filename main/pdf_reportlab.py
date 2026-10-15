@@ -194,7 +194,8 @@ def render(context, logo=None) -> bytes:
     # -- line items ---------------------------------------------------------
     # No rate column: customers see sizes and totals, never the per-m² or unit rate.
     col_widths = [width * f for f in (0.46, 0.22, 0.14, 0.18)]
-    headings = ['DESCRIPTION', 'SIZE', 'AREA' if all_sized else 'QTY / AREA', 'TOTAL']
+    quantity_heading = 'AREA' if all_sized else ('QTY / AREA' if context['any_sized'] else 'QTY')
+    headings = ['DESCRIPTION', 'SIZE', quantity_heading, 'TOTAL']
     rows = [[Paragraph(h, th) for h in headings]]
     for item in items:
         description = [Paragraph(_text(item.description), cell_b)]

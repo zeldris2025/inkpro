@@ -472,8 +472,9 @@ class Quote(models.Model):
         the discounted figure. ``total_override`` wins over everything, which
         is how staff force a negotiated number onto a quote.
         """
+        items = list(self.items.all())
         totals = pricing.quote_totals(
-            [item.line_total for item in self.items.all()],
+            [item.line_total for item in items],
             urgent_fee=self.urgent_fee,
         )
         discount = pricing.money(self.discount or 0)
@@ -482,6 +483,19 @@ class Quote(models.Model):
         if taxable < 0:
             taxable = Decimal('0.00')
         gst = pricing.add_gst(taxable)
+
+        # Quick-quote lines were priced GST-inclusive. Their GST is whatever
+        # takes them back up to the typed figure, so the quote total matches
+        # what staff entered to the cent instead of drifting on rounding.
+        inclusive = [item for item in items if item.total_inc_gst is not None]
+        if inclusive:
+            inclusive_ex = sum((item.line_total for item in inclusive), Decimal('0'))
+            others = taxable - inclusive_ex
+            if others >= 0:
+                inclusive_gst = sum(
+                    (pricing.money(item.total_inc_gst) for item in inclusive), Decimal('0')
+                ) - inclusive_ex
+                gst = pricing.money(inclusive_gst + pricing.add_gst(others))
 
         self.subtotal = subtotal
         self.gst_amount = gst
@@ -646,6 +660,15 @@ class QuoteItem(models.Model):
     )
     unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     line_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_inc_gst = models.DecimalField(
+        'line total incl. GST',
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Quick-quote price for the whole line, GST included. When set, the line '
+        'is priced from it and GST is backed out automatically.',
+    )
     artwork = models.FileField(upload_to='artwork/%Y/%m/', blank=True, null=True)
     customer_brief = models.TextField(
         blank=True, help_text='What the customer wants, in their own words.'
@@ -667,11 +690,17 @@ class QuoteItem(models.Model):
         return self.pricing_rule.unit_price(self.width_m, self.height_m)
 
     def save(self, *args, **kwargs):
-        if self.rate_per_m2 is not None and self.area_m2 > 0:
-            self.unit_price = pricing.money(Decimal(str(self.rate_per_m2)) * self.area_m2)
-        elif self.pricing_rule and not self.added_by_staff and not self.unit_price:
-            self.unit_price = self.price_from_rule()
-        self.line_total = pricing.line_total(self.unit_price, self.quantity)
+        if self.total_inc_gst is not None:
+            # The typed figure covers the whole line, whatever the quantity.
+            self.line_total = pricing.strip_gst(self.total_inc_gst)
+            qty = Decimal(self.quantity or 1)
+            self.unit_price = pricing.money(self.line_total / qty)
+        else:
+            if self.rate_per_m2 is not None and self.area_m2 > 0:
+                self.unit_price = pricing.money(Decimal(str(self.rate_per_m2)) * self.area_m2)
+            elif self.pricing_rule and not self.added_by_staff and not self.unit_price:
+                self.unit_price = self.price_from_rule()
+            self.line_total = pricing.line_total(self.unit_price, self.quantity)
         if not self.size and self.width_m and self.height_m:
             self.size = f'{plain_number(self.width_m)}m × {plain_number(self.height_m)}m'
         super().save(*args, **kwargs)

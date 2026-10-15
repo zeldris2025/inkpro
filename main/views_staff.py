@@ -195,10 +195,17 @@ def quote_new(request):
 
     The quote lands in review rather than going straight out, so staff get the
     usual Preview PDF / Approve & send screen to check it first.
+
+    ``mode=quick`` takes just a description, quantity and GST-inclusive total
+    per line, for a fast price with no sizes or rates.
     """
+    quick = (request.POST or request.GET).get('mode') == 'quick'
     form = StaffManualQuoteForm(request.POST or None)
     formset = StaffManualLineFormSet(
-        request.POST or None, queryset=QuoteItem.objects.none(), prefix='lines'
+        request.POST or None,
+        queryset=QuoteItem.objects.none(),
+        prefix='lines',
+        form_kwargs={'quick': quick},
     )
     if request.method == 'POST':
         if form.is_valid() and formset.is_valid():
@@ -225,7 +232,7 @@ def quote_new(request):
         messages.error(request, 'Please fix the highlighted fields.')
 
     return render(
-        request, 'main/staff/quote_new.html', {'form': form, 'formset': formset}
+        request, 'main/staff/quote_new.html', {'form': form, 'formset': formset, 'quick': quick}
     )
 
 

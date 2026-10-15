@@ -5,8 +5,14 @@
 <h1 class="mt-5 font-display text-3xl">New quote</h1>
 <p class="mt-1 text-sm text-white/45">Write a quote by hand. It's saved to review, where you can preview the PDF and approve &amp; send it.</p>
 
-<form method="post" id="manual-quote" class="mt-7 grid gap-6 lg:grid-cols-3">
+<style>
+  #manual-quote[data-mode="quick"] [data-only="detailed"],
+  #manual-quote[data-mode="detailed"] [data-only="quick"] { display: none; }
+</style>
+
+<form method="post" id="manual-quote" data-mode="{% if quick %}quick{% else %}detailed{% endif %}" class="mt-7 grid gap-6 lg:grid-cols-3">
   {% csrf_token %}
+  <input type="hidden" name="mode" value="{% if quick %}quick{% else %}detailed{% endif %}">
   {{ formset.management_form }}
 
   <div class="space-y-6 lg:col-span-2">
@@ -30,7 +36,12 @@
       <div class="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 class="font-display text-lg">Line items</h2>
-          <p class="text-xs text-zinc-500">Sized work: give width × height and a rate per m². Anything else: a unit price. The note prints under the description.</p>
+          <p class="text-xs text-zinc-500" data-only="detailed">Sized work: give width × height and a rate per m². Anything else: a unit price. The note prints under the description.</p>
+          <p class="text-xs text-zinc-500" data-only="quick">Just a description, quantity and the total for each line, GST included — GST is worked out from it. The note is optional.</p>
+        </div>
+        <div class="flex rounded-full border border-zinc-300 p-1" role="group" aria-label="Quote type">
+          <button type="button" data-set-mode="detailed" class="rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest transition">Detailed</button>
+          <button type="button" data-set-mode="quick" class="rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest transition">Quick</button>
         </div>
       </div>
       {% for error in formset.non_form_errors %}<p class="mt-3 text-sm font-semibold text-red-600">{{ error }}</p>{% endfor %}
@@ -50,7 +61,7 @@
       <h2 class="font-display text-lg">Pricing &amp; terms</h2>
       <div class="mt-4 space-y-4">
         {% for field in form %}{% if field.name in 'normal_rate is_urgent urgent_fee discount valid_until staff_notes' %}
-        <div>
+        <div {% if field.name == 'normal_rate' %}data-only="detailed"{% endif %}>
           {% if field.name == 'is_urgent' %}
           <label class="flex items-center gap-2 text-sm font-semibold">{{ field }} {{ field.label }}</label>
           {% else %}
@@ -67,7 +78,7 @@
     <div class="rounded-xl border border-white/10 bg-white/5 p-6 lg:sticky lg:top-32">
       <h2 class="font-display text-lg">Totals</h2>
       <dl class="mt-4 space-y-2 text-sm">
-        <div class="flex justify-between text-white/55"><dt>Area</dt><dd class="tabular"><span data-total="area">0</span> m²</dd></div>
+        <div class="flex justify-between text-white/55" data-only="detailed"><dt>Area</dt><dd class="tabular"><span data-total="area">0</span> m²</dd></div>
         <div class="flex justify-between text-white/55"><dt>Subtotal</dt><dd class="tabular" data-total="subtotal">$0.00</dd></div>
         <div class="flex justify-between text-white/55"><dt>GST ({{ GST_RATE_PCT }}%)</dt><dd class="tabular" data-total="gst">$0.00</dd></div>
         <div class="flex items-baseline justify-between border-t border-white/15 pt-3">
@@ -108,7 +119,42 @@
     totalForms.value = rows.length;
   }
 
+  const isQuick = () => form.dataset.mode === 'quick';
+
+  function setMode(mode) {
+    form.dataset.mode = mode;
+    field('mode').value = mode;
+    form.querySelectorAll('[data-set-mode]').forEach((button) => {
+      const active = button.dataset.setMode === mode;
+      button.classList.toggle('bg-ink-yellow', active);
+      button.classList.toggle('text-black', active);
+      button.classList.toggle('text-zinc-500', !active);
+      button.setAttribute('aria-pressed', active);
+    });
+    recalc();
+  }
+
+  function recalcQuick() {
+    // Typed totals include GST; back it out per line, as the server does.
+    let inclusive = 0, subtotal = 0;
+    lines.querySelectorAll('[data-line]').forEach((row) => {
+      const typed = round2(num(row, 'total'));
+      inclusive += typed;
+      subtotal += round2(typed / (1 + gstRate));
+      row.querySelector('[data-line-total]').textContent = money(typed);
+    });
+    const adjust = (parseFloat(field('urgent_fee').value) || 0) - (parseFloat(field('discount').value) || 0);
+    const others = Math.max(round2(adjust), 0);
+    const gst = round2(inclusive - subtotal + others * gstRate);
+    const set = (key, text) => (form.querySelector('[data-total="' + key + '"]').textContent = text);
+    set('subtotal', money(subtotal));
+    set('gst', money(gst));
+    set('total', money(round2(subtotal + adjust + gst)));
+    form.querySelector('[data-total="saving"]').classList.add('hidden');
+  }
+
   function recalc() {
+    if (isQuick()) return recalcQuick();
     let subtotal = 0, area = 0, normalSubtotal = 0;
     const normalRate = parseFloat(field('normal_rate').value) || 0;
     lines.querySelectorAll('[data-line]').forEach((row) => {
@@ -156,7 +202,7 @@
     }
     renumber();
     recalc();
-    added.querySelector('input[type="text"]').focus();
+    added.querySelector('[name$="-description"]').focus();
   });
 
   lines.addEventListener('click', (event) => {
@@ -171,8 +217,11 @@
   // unit price — but re-enable before submit so validation errors keep values.
   form.addEventListener('submit', () => form.querySelectorAll('[data-calc="unit"]').forEach((el) => (el.disabled = false)));
   form.addEventListener('input', recalc);
+  form.querySelectorAll('[data-set-mode]').forEach((button) =>
+    button.addEventListener('click', () => setMode(button.dataset.setMode))
+  );
   renumber();
-  recalc();
+  setMode(form.dataset.mode);
 })();
 </script>
 {% endblock %}

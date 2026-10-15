@@ -3125,3 +3125,90 @@ class ManualQuoteTests(TestCase):
         quote = Quote.objects.get()
         self.assertEqual(quote.subtotal, Decimal('100.00'))
         self.assertEqual(response.status_code, 302)
+
+
+class QuickQuoteTests(TestCase):
+    """A quick quote needs only description, qty and a GST-inclusive line total."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
+        self.client.force_login(self.staff)
+
+    def post(self, lines, mode='quick', **extra):
+        data = {
+            'mode': mode,
+            'guest_name': 'Walk-in Client',
+            'urgent_fee': '0',
+            'discount': '0',
+            'lines-TOTAL_FORMS': str(len(lines)),
+            'lines-INITIAL_FORMS': '0',
+            'lines-MIN_NUM_FORMS': '1',
+            'lines-MAX_NUM_FORMS': '1000',
+        }
+        for i, line in enumerate(lines):
+            data.update({f'lines-{i}-{key}': value for key, value in line.items()})
+        data.update(extra)
+        return self.client.post(reverse('staff_quote_new'), data)
+
+    def test_gst_is_backed_out_of_the_typed_totals(self):
+        response = self.post([
+            {'description': 'Banner', 'quantity': '1', 'total_inc_gst': '1150.00'},
+            {'description': 'Stickers', 'quantity': '3', 'total_inc_gst': '1000.00'},
+        ])
+        quote = Quote.objects.get()
+        self.assertRedirects(response, reverse('staff_quote_detail', args=[quote.pk]))
+        # The quote total is exactly what was typed, with no rounding drift.
+        self.assertEqual(quote.total, Decimal('2150.00'))
+        self.assertEqual(quote.subtotal, Decimal('1869.57'))  # 1000.00 + 869.57
+        self.assertEqual(quote.gst_amount, Decimal('280.43'))
+        stickers = quote.items.get(description='Stickers')
+        self.assertEqual(stickers.quantity, 3)
+        self.assertEqual(stickers.line_total, Decimal('869.57'))  # whole line, not each
+
+    def test_description_qty_and_total_are_required(self):
+        response = self.post([{'description': '', 'quantity': '', 'total_inc_gst': ''}])
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Quote.objects.exists())
+        self.assertContains(response, 'Enter the total for this line.')
+        self.assertContains(response, 'Enter a quantity of 1 or more.')
+        self.assertContains(response, 'This field is required.')  # description
+        self.assertContains(response, 'data-mode="quick"')  # stays in quick mode
+
+    def test_quick_lines_ignore_hidden_detailed_fields(self):
+        self.post([{
+            'description': 'Banner', 'quantity': '1', 'total_inc_gst': '115.00',
+            'width_m': '2', 'height_m': '1', 'rate_per_m2': '100',
+        }])
+        item = Quote.objects.get().items.get()
+        self.assertIsNone(item.rate_per_m2)
+        self.assertEqual(item.line_total, Decimal('100.00'))
+
+    def test_detailed_mode_ignores_a_stray_total(self):
+        self.post([{
+            'description': 'Banner', 'quantity': '1', 'total_inc_gst': '999',
+            'width_m': '2', 'height_m': '1', 'rate_per_m2': '100',
+        }], mode='detailed')
+        item = Quote.objects.get().items.get()
+        self.assertIsNone(item.total_inc_gst)
+        self.assertEqual(item.line_total, Decimal('200.00'))
+
+    def test_the_pdf_heads_the_column_qty(self):
+        from main.pdf import render_quote_html
+
+        self.post([{'description': 'Banner', 'quantity': '2', 'total_inc_gst': '230.00'}])
+        html = render_quote_html(Quote.objects.get())
+        self.assertIn('>Qty</th>', html)
+        self.assertNotIn('Qty / Area', html)
+        self.assertIn('$230.00', html)
+
+    def test_staff_can_edit_a_quick_line_by_its_total(self):
+        self.post([{'description': 'Banner', 'quantity': '1', 'total_inc_gst': '115.00'}])
+        quote = Quote.objects.get()
+        item = quote.items.get()
+        page = self.client.get(reverse('staff_quote_detail', args=[quote.pk]))
+        self.assertContains(page, 'Total incl. GST')
+        item.total_inc_gst = Decimal('230.00')
+        item.save()
+        quote.recalculate()
+        self.assertEqual(quote.total, Decimal('230.00'))
+        self.assertEqual(quote.subtotal, Decimal('200.00'))
