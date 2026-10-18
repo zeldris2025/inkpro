@@ -317,11 +317,12 @@ class StaffManualLineForm(forms.ModelForm):
 
     Detailed lines are sized at a rate per m², or carry a unit price. A quick
     quote (``quick=True``) needs only a description, a quantity and the
-    GST-inclusive total for the whole line; GST is backed out of that total.
+    GST-inclusive total for the whole line, with an optional size label; GST
+    is backed out of that total.
     """
 
     #: Fields only a detailed line uses; a quick line clears them.
-    DETAILED_ONLY = ('category', 'width_m', 'height_m', 'size', 'rate_per_m2', 'unit_price')
+    DETAILED_ONLY = ('category', 'width_m', 'height_m', 'rate_per_m2', 'unit_price')
 
     class Meta:
         model = QuoteItem
@@ -382,7 +383,7 @@ class StaffManualLineForm(forms.ModelForm):
 
     def _clean_quick(self, cleaned):
         for name in self.DETAILED_ONLY:
-            cleaned[name] = None if name != 'size' else ''
+            cleaned[name] = None
         if not cleaned.get('quantity'):
             self.add_error('quantity', 'Enter a quantity of 1 or more.')
         total = cleaned.get('total_inc_gst')

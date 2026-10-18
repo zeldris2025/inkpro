@@ -8,6 +8,10 @@
 <style>
   #manual-quote[data-mode="quick"] [data-only="detailed"],
   #manual-quote[data-mode="detailed"] [data-only="quick"] { display: none; }
+  /* A quick line fits Size, Qty and Total beside a narrower description. */
+  @media (min-width: 640px) {
+    #manual-quote[data-mode="quick"] [data-field="description"] { grid-column: span 3 / span 3; }
+  }
 </style>
 
 <form method="post" id="manual-quote" data-mode="{% if quick %}quick{% else %}detailed{% endif %}" class="mt-7 grid gap-6 lg:grid-cols-3">
@@ -37,7 +41,7 @@
         <div>
           <h2 class="font-display text-lg">Line items</h2>
           <p class="text-xs text-zinc-500" data-only="detailed">Sized work: give width × height and a rate per m². Anything else: a unit price. The note prints under the description.</p>
-          <p class="text-xs text-zinc-500" data-only="quick">Just a description, quantity and the total for each line, GST included — GST is worked out from it. The note is optional.</p>
+          <p class="text-xs text-zinc-500" data-only="quick">Just a description, size, quantity and the total for each line, GST included — GST is worked out from it. Size and note are optional.</p>
         </div>
         <div class="flex rounded-full border border-zinc-300 p-1" role="group" aria-label="Quote type">
           <button type="button" data-set-mode="detailed" class="rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest transition">Detailed</button>
@@ -121,6 +125,13 @@
 
   const isQuick = () => form.dataset.mode === 'quick';
 
+  // A quick line has no width × height to fill the size in from.
+  function sizePlaceholders() {
+    form.querySelectorAll('[name$="-size"]').forEach((el) => {
+      el.placeholder = isQuick() ? 'e.g. 3m × 1m' : 'Auto from W × H';
+    });
+  }
+
   function setMode(mode) {
     form.dataset.mode = mode;
     field('mode').value = mode;
@@ -131,6 +142,7 @@
       button.classList.toggle('text-zinc-500', !active);
       button.setAttribute('aria-pressed', active);
     });
+    sizePlaceholders();
     recalc();
   }
 
@@ -201,6 +213,7 @@
       if (category) added.querySelector('select').value = category.value;
     }
     renumber();
+    sizePlaceholders();
     recalc();
     added.querySelector('[name$="-description"]').focus();
   });

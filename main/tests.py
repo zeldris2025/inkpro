@@ -3262,6 +3262,16 @@ class QuickQuoteTests(TestCase):
         self.assertIsNone(item.rate_per_m2)
         self.assertEqual(item.line_total, Decimal('100.00'))
 
+    def test_quick_lines_keep_their_size(self):
+        from main.pdf import render_quote_html
+
+        self.post([{
+            'description': 'Banner', 'size': '3m × 1m', 'quantity': '2', 'total_inc_gst': '230.00',
+        }])
+        quote = Quote.objects.get()
+        self.assertEqual(quote.items.get().size, '3m × 1m')
+        self.assertIn('3m × 1m', render_quote_html(quote))
+
     def test_detailed_mode_ignores_a_stray_total(self):
         self.post([{
             'description': 'Banner', 'quantity': '1', 'total_inc_gst': '999',
