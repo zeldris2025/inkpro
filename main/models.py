@@ -386,6 +386,9 @@ class Quote(models.Model):
     )
     approved_at = models.DateTimeField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
+    # When the quote email actually reached the outbox. A quote approved with
+    # no client email is marked sent (so its link works) but never emailed.
+    emailed_at = models.DateTimeField(null=True, blank=True)
     responded_at = models.DateTimeField(null=True, blank=True)
     valid_until = models.DateField(null=True, blank=True)
 
@@ -654,6 +657,15 @@ class Quote(models.Model):
     @property
     def awaiting_customer(self):
         return self.status == self.SENT and not self.is_expired
+
+    @property
+    def is_unsent(self):
+        """Approved and marked sent, but this version was never emailed out."""
+        return (
+            self.status == self.SENT
+            and self.sent_at is not None
+            and (self.emailed_at is None or self.emailed_at < self.sent_at)
+        )
 
     @property
     def is_editable_by_staff(self):

@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
 from django.http import HttpResponse
@@ -29,7 +30,7 @@ from .tasks import notify_staff_quote_approved_task, run_task, send_quote_to_cus
 from .views import create_invoice_for_quote
 
 #: Moves only a manager may make: approving a quote, and sending one out.
-MANAGER_ONLY = {Quote.APPROVED, Quote.SENT, 'APPROVE_AND_SEND'}
+MANAGER_ONLY = {Quote.APPROVED, Quote.SENT, 'APPROVE_AND_SEND', 'EMAIL_QUOTE'}
 
 #: Columns of the register, in the spreadsheet's own order.
 REGISTER_COLUMNS = [
@@ -92,6 +93,43 @@ BOARD_COLUMNS = [
     (Quote.DECLINED, 'Declined', [Quote.DECLINED]),
 ]
 
+#: Board columns that page through their quotes, this many at a time. The
+#: rest show their latest quotes, capped at BOARD_COLUMN_CAP.
+PAGED_COLUMNS = {Quote.IN_REVIEW, Quote.APPROVED}
+BOARD_PAGE_SIZE = 5
+BOARD_COLUMN_CAP = 25
+
+
+def _board_column(request, key, label, statuses):
+    """One kanban column, newest quote first; paged if it is in PAGED_COLUMNS."""
+    queryset = (
+        Quote.objects.filter(status__in=statuses)
+        .select_related('customer', 'approved_by')
+        .order_by('-created_at', '-pk')
+    )
+    column = {'key': key, 'label': label, 'page': None}
+    if key not in PAGED_COLUMNS:
+        column['quotes'] = list(queryset[:BOARD_COLUMN_CAP])
+        column['count'] = len(column['quotes'])
+        return column
+
+    param = f'page_{key.lower()}'
+    page = Paginator(queryset, BOARD_PAGE_SIZE).get_page(request.GET.get(param))
+
+    def url_for(number):
+        query = request.GET.copy()
+        query[param] = number
+        return f'?{query.urlencode()}#column-{key.lower()}'
+
+    column.update(
+        quotes=list(page.object_list),
+        count=page.paginator.count,
+        page=page,
+        prev_url=url_for(page.previous_page_number()) if page.has_previous() else None,
+        next_url=url_for(page.next_page_number()) if page.has_next() else None,
+    )
+    return column
+
 
 @staff_required
 def quote_inbox(request):
@@ -112,14 +150,7 @@ def quote_inbox(request):
         )
 
     board = [
-        (
-            key,
-            label,
-            list(
-                Quote.objects.filter(status__in=statuses).select_related('customer', 'approved_by')[:25]
-            ),
-        )
-        for key, label, statuses in BOARD_COLUMNS
+        _board_column(request, key, label, statuses) for key, label, statuses in BOARD_COLUMNS
     ]
     return render(
         request,
@@ -153,6 +184,12 @@ def quote_detail(request, pk):
         form = StaffQuoteForm(request.POST, instance=quote)
         formset = StaffQuoteItemFormSet(request.POST, queryset=item_queryset)
         if form.is_valid() and formset.is_valid():
+            # Fixing the client's contact details is not a new version of the
+            # quote, so it does not reopen one the customer already has.
+            reopening = reopening and (
+                formset.has_changed()
+                or any(name not in StaffQuoteForm.CLIENT_FIELDS for name in form.changed_data)
+            )
             form.save()
             for item in formset.save(commit=False):
                 item.quote = quote
@@ -318,6 +355,8 @@ def quote_transition(request, pk):
 
     if target == 'APPROVE_AND_SEND':
         return _approve_and_send(request, quote)
+    if target == 'EMAIL_QUOTE':
+        return _email_quote(request, quote)
 
     preparer = quote.reviewed_by
     try:
@@ -344,11 +383,12 @@ def _alert_preparer(quote, preparer, *, sent_to_customer):
 
 
 def _approve_and_send(request, quote):
-    """Approve, render the branded PDF and email it with accept/decline links."""
-    if not quote.contact_email:
-        messages.error(request, 'This quote has no customer email address to send to.')
-        return redirect('staff_quote_detail', pk=quote.pk)
+    """Approve, render the branded PDF and email it with accept/decline links.
 
+    With no client email the quote is still approved and marked sent, so its
+    customer link and PDF can be shared by hand; it shows as Unsent until it
+    is emailed.
+    """
     # Approving stamps reviewed_by with the manager, so note who prepared it first.
     preparer = quote.reviewed_by
     was_approved = quote.status == Quote.APPROVED
@@ -366,13 +406,34 @@ def _approve_and_send(request, quote):
     except Exception:
         messages.warning(request, 'Quote sent, but the PDF could not be stored on the record.')
 
-    run_task(send_quote_to_customer_task, quote.pk)
+    emailing = bool(quote.contact_email)
+    if emailing:
+        run_task(send_quote_to_customer_task, quote.pk)
     if not was_approved:
-        _alert_preparer(quote, preparer, sent_to_customer=True)
+        _alert_preparer(quote, preparer, sent_to_customer=emailing)
     label = f'Quote {quote.quote_number}'
     if quote.revision:
         label = f'Revision {quote.revision} of {quote.quote_number}'
-    messages.success(request, f'{label} sent to {quote.contact_email}.')
+    if emailing:
+        messages.success(request, f'{label} sent to {quote.contact_email}.')
+    else:
+        messages.warning(
+            request,
+            f'{label} approved, but not emailed: there is no client email, so it shows as Unsent. '
+            'Share the PDF or customer link yourself, or add an email and use “Email quote”.',
+        )
+    return redirect('staff_quote_detail', pk=quote.pk)
+
+
+def _email_quote(request, quote):
+    """Email a quote that was approved and marked sent without an address."""
+    if quote.status != Quote.SENT:
+        messages.error(request, 'Only a sent quote can be emailed.')
+    elif not quote.contact_email:
+        messages.error(request, 'Add the client’s email first.')
+    else:
+        run_task(send_quote_to_customer_task, quote.pk)
+        messages.success(request, f'Quote {quote.quote_number} emailed to {quote.contact_email}.')
     return redirect('staff_quote_detail', pk=quote.pk)
 
 

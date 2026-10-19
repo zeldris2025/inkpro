@@ -230,12 +230,24 @@ StaffQuoteItemFormSet = forms.modelformset_factory(
 class StaffQuoteForm(forms.ModelForm):
     """Quote-level adjustments staff can make during review."""
 
+    #: Contact fields, rendered in their own "Client" block on the review screen.
+    CLIENT_FIELDS = ('guest_name', 'guest_email', 'guest_phone')
+
     class Meta:
         model = Quote
         fields = [
+            'guest_name', 'guest_email', 'guest_phone',
             'project_title', 'normal_rate', 'urgent_fee', 'discount', 'total_override',
             'valid_until', 'staff_notes',
         ]
+        labels = {
+            'guest_name': 'Client name',
+            'guest_email': 'Client email',
+            'guest_phone': 'Client phone',
+        }
+        help_texts = {
+            'guest_email': 'Where Approve & send emails the quote.',
+        }
         widgets = {
             'normal_rate': forms.NumberInput(
                 attrs={'step': '0.01', 'min': '0', 'placeholder': 'e.g. 140.00 — blank for no special rate'}
@@ -251,7 +263,18 @@ class StaffQuoteForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # A linked customer account supplies the contact details, so they are
+        # edited on the account, not here.
+        if self.instance.customer_id:
+            for name in self.CLIENT_FIELDS:
+                del self.fields[name]
         style(self.fields, LIGHT_INPUT)
+
+    def client_fields(self):
+        return [self[name] for name in self.CLIENT_FIELDS if name in self.fields]
+
+    def adjustment_fields(self):
+        return [field for field in self if field.name not in self.CLIENT_FIELDS]
 
 
 class StaffQuoteItemAddForm(forms.ModelForm):

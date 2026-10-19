@@ -155,9 +155,11 @@ def send_quote_to_customer(quote, request=None):
     """Email the approved quote with its PDF and one-click accept/decline links."""
     from .pdf import render_quote_pdf
 
+    from django.utils import timezone
+
     filename, content, mimetype = render_quote_pdf(quote, request=request)
     public_url = quote.public_url()
-    return send_branded_email(
+    sent = send_branded_email(
         to=quote.contact_email,
         key=EmailTemplate.QUOTE_SENT,
         template='main/email/quote_sent.html',
@@ -172,6 +174,10 @@ def send_quote_to_customer(quote, request=None):
         name=quote.contact_name or 'there',
         quote_number=quote.quote_number,
     )
+    if sent:
+        quote.emailed_at = timezone.now()
+        quote.save(update_fields=['emailed_at'])
+    return sent
 
 
 def send_quote_accepted(quote):

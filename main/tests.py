@@ -599,7 +599,7 @@ class StaffQuoteBoardTests(TestCase):
 
     def board(self):
         response = self.client.get(reverse('staff_quote_inbox'))
-        return {key: quotes for key, _, quotes in response.context['board']}, response
+        return {column['key']: column['quotes'] for column in response.context['board']}, response
 
     def test_approve_and_send_lands_in_approved_with_the_approver_named(self):
         self.client.post(
@@ -625,6 +625,53 @@ class StaffQuoteBoardTests(TestCase):
         self.quote.transition_to(Quote.IN_REVIEW, user=other)
         self.assertEqual(self.quote.reviewed_by, other)
         self.assertEqual(self.quote.approved_by, self.staff)
+
+    def make_quotes(self, status, count):
+        """*count* quotes in *status*, created a minute apart, oldest first."""
+        quotes = []
+        for minutes in range(count, 0, -1):
+            quote = Quote.objects.create(guest_name=f'Client {minutes}', status=status)
+            Quote.objects.filter(pk=quote.pk).update(
+                created_at=timezone.now() - timezone.timedelta(minutes=minutes)
+            )
+            quotes.append(quote)
+        return quotes
+
+    def column(self, key, **params):
+        response = self.client.get(reverse('staff_quote_inbox'), params)
+        return next(c for c in response.context['board'] if c['key'] == key), response
+
+    def test_in_review_and_approved_show_five_newest_first_with_pages(self):
+        self.quote.delete()
+        for status in (Quote.IN_REVIEW, Quote.APPROVED):
+            with self.subTest(status=status):
+                quotes = self.make_quotes(status, 7)
+                newest_first = list(reversed(quotes))
+                column, response = self.column(status)
+                self.assertEqual(column['quotes'], newest_first[:5])
+                self.assertEqual(column['count'], 7)  # the badge counts them all
+                self.assertContains(response, '1 / 2')
+
+                param = f'page_{status.lower()}'
+                column, _ = self.column(status, **{param: 2})
+                self.assertEqual(column['quotes'], newest_first[5:])
+                self.assertIsNone(column['next_url'])
+                self.assertIn(f'{param}=1', column['prev_url'])
+
+    def test_paging_one_column_keeps_the_other_on_its_page(self):
+        self.make_quotes(Quote.IN_REVIEW, 6)
+        self.make_quotes(Quote.APPROVED, 6)
+        column, _ = self.column(Quote.IN_REVIEW, page_approved=2)
+        self.assertIn('page_approved=2', column['next_url'])
+        approved, _ = self.column(Quote.APPROVED, page_approved=2)
+        self.assertEqual(len(approved['quotes']), 1)
+
+    def test_other_columns_are_not_paged(self):
+        self.make_quotes(Quote.SUBMITTED, 7)  # plus the one from setUp
+        column, response = self.column(Quote.SUBMITTED)
+        self.assertEqual(len(column['quotes']), 8)
+        self.assertIsNone(column['page'])
+        self.assertNotContains(response, 'data-column-pager')
 
     def test_staff_can_delete_a_quote_and_its_register_entry_survives(self):
         invoice = Invoice.objects.create(quote=self.quote, client_name='Ada', invoice_amount=Decimal('322'))
@@ -673,12 +720,14 @@ class QuoteResponseAndRevisionTests(TestCase):
             {'decision': decision, **extra},
         )
 
-    def edit_as_staff(self, unit_price):
+    def edit_as_staff(self, unit_price, **client):
         self.client.force_login(self.staff)
         return self.client.post(
             reverse('staff_quote_detail', args=[self.quote.pk]),
             {
                 'save_quote': '1',
+                'guest_name': 'Ada', 'guest_email': 'ada@example.com', 'guest_phone': '',
+                **client,
                 'form-TOTAL_FORMS': '1', 'form-INITIAL_FORMS': '1',
                 'form-MIN_NUM_FORMS': '0', 'form-MAX_NUM_FORMS': '1000',
                 'form-0-id': self.item.pk, 'form-0-description': 'Banner',
@@ -741,7 +790,7 @@ class QuoteResponseAndRevisionTests(TestCase):
         self.respond('accept')
         self.client.force_login(self.staff)
         response = self.client.get(reverse('staff_quote_inbox'))
-        columns = {key: quotes for key, _, quotes in response.context['board']}
+        columns = {column['key']: column['quotes'] for column in response.context['board']}
         self.assertIn(self.quote, columns[Quote.ACCEPTED])
         self.assertIn(Quote.DECLINED, columns)
 
@@ -3492,6 +3541,66 @@ class ApprovalWorkflowTests(TestCase):
 
         self.client.force_login(self.staff)
         self.assertNotContains(self.client.get(reverse('staff_dashboard')), 'awaiting your approval')
+
+    def test_a_quote_with_no_email_can_still_be_approved_and_shows_unsent(self):
+        quote, _ = self.create_quote(self.staff)
+        quote.guest_email = ''
+        quote.save()
+        self.client.force_login(self.manager)
+        page = self.client.get(reverse('staff_quote_detail', args=[quote.pk]))
+        self.assertContains(page, 'No client email.')
+        mail.outbox.clear()
+
+        response = self.approve_and_send(quote, self.manager)
+        quote.refresh_from_db()
+        self.assertEqual(quote.status, Quote.SENT)
+        self.assertEqual(quote.approved_by, self.manager)
+        self.assertTrue(quote.is_unsent)
+        self.assertContains(response, 'approved, but not emailed')
+        self.assertContains(response, 'data-unsent')
+        # Only the preparer hears about it, and is told it was not sent.
+        [notice] = mail.outbox
+        self.assertEqual(notice.to, ['sam@example.com'])
+        self.assertIn("hasn't been sent", notice.alternatives[0][0])
+        board = self.client.get(reverse('staff_quote_inbox'))
+        self.assertContains(board, 'Unsent')
+
+    def test_adding_the_email_later_lets_a_manager_email_it_without_a_new_revision(self):
+        quote, _ = self.create_quote(self.staff)
+        quote.guest_email = ''
+        quote.save()
+        self.approve_and_send(quote, self.manager)
+        quote.refresh_from_db()
+        item = quote.items.get()
+        self.client.post(reverse('staff_quote_detail', args=[quote.pk]), {
+            'save_quote': '1',
+            'guest_name': 'Walk-in Client', 'guest_email': 'late@example.com', 'guest_phone': '',
+            'form-TOTAL_FORMS': '1', 'form-INITIAL_FORMS': '1',
+            'form-MIN_NUM_FORMS': '0', 'form-MAX_NUM_FORMS': '1000',
+            'form-0-id': item.pk, 'form-0-description': item.description, 'form-0-size': '',
+            'form-0-quantity': '1', 'form-0-unit_price': str(item.unit_price),
+            'form-0-total_inc_gst': '115.00',
+            'urgent_fee': '0', 'discount': '0', 'total_override': '',
+            'valid_until': quote.valid_until.isoformat(),  # as the page posts it back
+            'staff_notes': '', 'project_title': '', 'normal_rate': '',
+        })
+        quote.refresh_from_db()
+        self.assertEqual(quote.status, Quote.SENT)  # contact fix, not a revision
+        self.assertEqual(quote.revision, 0)
+        self.assertEqual(quote.guest_email, 'late@example.com')
+        page = self.client.get(reverse('staff_quote_detail', args=[quote.pk]))
+        self.assertContains(page, 'Email quote to late@example.com')
+
+        mail.outbox.clear()
+        self.client.post(reverse('staff_quote_transition', args=[quote.pk]), {'status': 'EMAIL_QUOTE'})
+        quote.refresh_from_db()
+        self.assertEqual([m.to for m in mail.outbox], [['late@example.com']])
+        self.assertFalse(quote.is_unsent)
+
+        self.client.force_login(self.staff)  # staff cannot email it themselves
+        mail.outbox.clear()
+        self.client.post(reverse('staff_quote_transition', args=[quote.pk]), {'status': 'EMAIL_QUOTE'})
+        self.assertEqual(mail.outbox, [])
 
     def test_owners_and_superusers_count_as_managers(self):
         from main.permissions import OWNER_GROUP, is_manager

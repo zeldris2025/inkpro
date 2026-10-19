@@ -28,14 +28,14 @@
 
 {% if view_mode == 'board' %}
 <div class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
-  {% for column_status, column_label, quotes_in_column in board %}
-  <div class="rounded-xl border p-4 {% if column_status == 'ACCEPTED' %}border-green-400/25 bg-green-500/5{% elif column_status == 'DECLINED' %}border-red-400/25 bg-red-500/5{% else %}border-white/10 bg-white/5{% endif %}">
+  {% for column in board %}{% with column_status=column.key %}
+  <div id="column-{{ column_status|lower }}" class="rounded-xl border p-4 {% if column_status == 'ACCEPTED' %}border-green-400/25 bg-green-500/5{% elif column_status == 'DECLINED' %}border-red-400/25 bg-red-500/5{% else %}border-white/10 bg-white/5{% endif %}">
     <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-xs font-bold uppercase tracking-widest {% if column_status == 'ACCEPTED' %}text-green-300{% elif column_status == 'DECLINED' %}text-red-300{% else %}text-white/50{% endif %}">{{ column_label }}</h2>
-      <span class="rounded-full bg-white/10 px-2 py-0.5 text-xs font-bold">{{ quotes_in_column|length }}</span>
+      <h2 class="text-xs font-bold uppercase tracking-widest {% if column_status == 'ACCEPTED' %}text-green-300{% elif column_status == 'DECLINED' %}text-red-300{% else %}text-white/50{% endif %}">{{ column.label }}</h2>
+      <span class="rounded-full bg-white/10 px-2 py-0.5 text-xs font-bold">{{ column.count }}</span>
     </div>
     <div class="space-y-3">
-      {% for quote in quotes_in_column %}
+      {% for quote in column.quotes %}
       <a href="{% url 'staff_quote_detail' quote.pk %}" class="block rounded-lg border border-white/10 bg-black/40 p-4 transition hover:border-ink-yellow/60 hover:bg-black/70">
         <div class="flex items-center justify-between gap-2">
           <span class="font-bold text-ink-yellow">{{ quote.quote_number }}{% if quote.revision %}<span class="ml-1 text-[10px] font-bold text-white/40">rev {{ quote.revision }}</span>{% endif %}</span>
@@ -47,7 +47,9 @@
           ✓ Approved by {{ quote.approved_by.get_full_name|default:quote.approved_by.username }}
         </div>
         {% endif %}
-        {% if quote.status == 'SENT' %}
+        {% if quote.is_unsent %}
+        <div class="mt-0.5 text-[11px] font-semibold text-amber-300" data-unsent>Unsent · no email went out</div>
+        {% elif quote.status == 'SENT' %}
         <div class="mt-0.5 text-[11px] text-white/40">✉ Sent {{ quote.sent_at|date:"j M" }} · awaiting customer</div>
         {% elif quote.status == 'APPROVED' %}
         <div class="mt-0.5 text-[11px] font-semibold text-ink-yellow/80">Not sent yet</div>
@@ -59,8 +61,17 @@
       </a>
       {% empty %}<p class="py-8 text-center text-xs text-white/30">Empty</p>{% endfor %}
     </div>
+    {% if column.page and column.page.paginator.num_pages > 1 %}
+    <nav class="mt-4 flex items-center justify-between text-xs" aria-label="{{ column.label }} pages" data-column-pager>
+      {% if column.prev_url %}<a href="{{ column.prev_url }}" class="rounded-full border border-white/15 px-3 py-1 font-bold transition hover:border-ink-yellow hover:text-ink-yellow">← Newer</a>
+      {% else %}<span class="rounded-full border border-white/5 px-3 py-1 font-bold text-white/20">← Newer</span>{% endif %}
+      <span class="text-white/40">{{ column.page.number }} / {{ column.page.paginator.num_pages }}</span>
+      {% if column.next_url %}<a href="{{ column.next_url }}" class="rounded-full border border-white/15 px-3 py-1 font-bold transition hover:border-ink-yellow hover:text-ink-yellow">Older →</a>
+      {% else %}<span class="rounded-full border border-white/5 px-3 py-1 font-bold text-white/20">Older →</span>{% endif %}
+    </nav>
+    {% endif %}
   </div>
-  {% endfor %}
+  {% endwith %}{% endfor %}
 </div>
 
 {% else %}
@@ -78,7 +89,7 @@
         <td class="px-4 py-3"><a href="{% url 'staff_quote_detail' quote.pk %}" class="font-bold text-ink-yellow hover:underline">{{ quote.quote_number }}</a>
           {% if quote.is_urgent %}<span class="ml-2 rounded bg-ink-magenta/25 px-1.5 py-0.5 text-[10px] font-bold uppercase text-ink-magenta">Rush</span>{% endif %}</td>
         <td class="px-4 py-3">{{ quote.contact_name|default:"—" }}<div class="text-xs text-white/35">{{ quote.contact_email }}</div></td>
-        <td class="px-4 py-3"><span class="rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider {% if quote.status == 'ACCEPTED' %}bg-green-500/20 text-green-300{% elif quote.status == 'DECLINED' %}bg-red-500/20 text-red-300{% else %}bg-white/10{% endif %}">{{ quote.get_status_display }}</span>{% if quote.revision %}<span class="ml-2 text-xs text-white/40">rev {{ quote.revision }}</span>{% endif %}</td>
+        <td class="px-4 py-3"><span class="rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider {% if quote.status == 'ACCEPTED' %}bg-green-500/20 text-green-300{% elif quote.status == 'DECLINED' %}bg-red-500/20 text-red-300{% else %}bg-white/10{% endif %}">{{ quote.get_status_display }}</span>{% if quote.is_unsent %}<span class="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">Unsent</span>{% endif %}{% if quote.revision %}<span class="ml-2 text-xs text-white/40">rev {{ quote.revision }}</span>{% endif %}</td>
         <td class="px-4 py-3 text-white/50">{{ quote.created_at|date:"j M Y" }}</td>
         <td class="px-4 py-3 text-white/50">{% if quote.approved_by %}{{ quote.approved_by.get_full_name|default:quote.approved_by.username }}<div class="text-xs text-white/30">{{ quote.approved_at|date:"j M Y" }}</div>{% else %}—{% endif %}</td>
         <td class="px-4 py-3 text-right font-bold tabular">${{ quote.total|floatformat:2|intcomma }}</td>

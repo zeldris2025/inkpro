@@ -23,6 +23,7 @@
 
   <div class="flex flex-wrap items-center gap-3">
     <span class="rounded-full bg-white/10 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">{{ quote.get_status_display }}</span>
+    {% if quote.is_unsent %}<span data-unsent class="rounded-full bg-amber-500/20 px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-amber-300" title="Approved, but never emailed to the client">Unsent</span>{% endif %}
     <a href="{% url 'staff_quote_pdf' quote.pk %}" target="_blank" class="ink-btn-ghost text-xs">Preview PDF</a>
     {% if can_approve %}<a href="{% url 'staff_quote_pdf' quote.pk %}?download=1" class="ink-btn text-xs">Download PDF</a>{% endif %}
     <a href="{{ quote.public_url }}" target="_blank" class="ink-btn-ghost text-xs">Customer view</a>
@@ -108,9 +109,23 @@
         </table>
       </div>
 
+      {% with client_fields=form.client_fields %}{% if client_fields %}
+      <h2 id="client" class="mt-8 font-display text-lg">Client</h2>
+      <div class="mt-4 grid gap-4 sm:grid-cols-3">
+        {% for field in client_fields %}
+        <div>
+          <label for="{{ field.id_for_label }}" class="mb-1.5 block text-xs font-bold uppercase tracking-widest text-zinc-500">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<p class="mt-1 text-xs text-zinc-400">{{ field.help_text }}</p>{% endif %}
+          {% for error in field.errors %}<p class="mt-1 text-xs font-semibold text-red-600">{{ error }}</p>{% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}{% endwith %}
+
       <h2 class="mt-8 font-display text-lg">Adjustments</h2>
       <div class="mt-4 grid gap-4 sm:grid-cols-2">
-        {% for field in form %}
+        {% for field in form.adjustment_fields %}
         <div class="{% if field.name in 'staff_notes project_title' %}sm:col-span-2{% endif %}">
           <label for="{{ field.id_for_label }}" class="mb-1.5 block text-xs font-bold uppercase tracking-widest text-zinc-500">{{ field.label }}</label>
           {{ field }}
@@ -169,16 +184,36 @@
       <form method="post" action="{% url 'staff_quote_transition' quote.pk %}" class="mt-4">
         {% csrf_token %}
         <input type="hidden" name="status" value="APPROVE_AND_SEND">
-        <button type="submit" class="ink-btn w-full justify-center py-3.5 text-base"
-                {% if not quote.contact_email %}disabled title="No customer email on this quote"{% endif %}>
+        <button type="submit" class="ink-btn w-full justify-center py-3.5 text-base">
           {% if quote.revision %}✓ Send revised quote{% else %}✓ Approve &amp; send{% endif %}
         </button>
       </form>
+      {% if not quote.contact_email %}
+      <p class="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
+        <strong>No client email.</strong> It will be approved and marked sent, but not emailed, so it shows as <strong>Unsent</strong>. Share the PDF or customer link yourself, or add an email in the Client section first.
+      </p>
+      {% endif %}
       <p class="mt-3 text-xs leading-relaxed text-white/50">
         Generates the branded PDF, emails it to {{ quote.contact_email|default:"the customer" }} with one-click
         accept/decline links, and moves the quote to Sent.{% if quote.revision %} The email tells them this revision replaces the earlier one.{% endif %}
         {% if quote.reviewed_by and quote.reviewed_by != request.user %}{{ quote.reviewed_by.get_full_name|default:quote.reviewed_by.username }} is emailed that it was approved.{% endif %}
       </p>
+      {% endif %}
+
+      {% if quote.is_unsent %}
+      <div class="mt-4 rounded-lg border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+        <p class="font-bold">Unsent</p>
+        <p class="mt-1 text-xs leading-relaxed text-amber-100/80">
+          Approved and marked sent, but never emailed to the client.
+          {% if not quote.contact_email %}Add their email in the <a href="#client" class="font-bold underline">Client</a> section and save to email it, or share the PDF or customer link yourself.{% endif %}
+        </p>
+        {% if quote.contact_email and can_approve %}
+        <form method="post" action="{% url 'staff_quote_transition' quote.pk %}" class="mt-3">
+          {% csrf_token %}<input type="hidden" name="status" value="EMAIL_QUOTE">
+          <button type="submit" class="ink-btn w-full justify-center py-2.5 text-sm">✉ Email quote to {{ quote.contact_email }}</button>
+        </form>
+        {% endif %}
+      </div>
       {% endif %}
 
       <div class="mt-5 space-y-2 border-t border-white/10 pt-5">
