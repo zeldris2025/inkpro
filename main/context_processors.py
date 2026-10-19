@@ -82,9 +82,29 @@ def white_sunday_banner():
     return {'date': day, 'arrived': today >= day}
 
 
+def approval_alerts(user):
+    """For a manager, how many quotes are waiting for their approval.
+
+    None for everyone else, so the staff nav only shows the badge to people
+    who can act on it.
+    """
+    from .models import Quote
+    from .permissions import is_manager
+
+    if not (user and user.is_authenticated and user.is_staff and is_manager(user)):
+        return {'is_quote_manager': False, 'pending_approvals': None}
+    return {
+        'is_quote_manager': True,
+        'pending_approvals': Quote.objects.filter(
+            status__in=[Quote.SUBMITTED, Quote.IN_REVIEW, Quote.REVISED]
+        ).count(),
+    }
+
+
 def site_settings(request):
     user = getattr(request, 'user', None)
     return {
+        **approval_alerts(user),
         'SITE_URL': settings.SITE_URL,
         'GST_RATE_PCT': int(float(settings.GST_RATE) * 100),
         'nav_categories': ServiceCategory.objects.filter(is_active=True)[:8],

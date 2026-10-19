@@ -84,6 +84,27 @@ def notify_staff_quote_response_task(quote_id):
 
 
 @_task
+def notify_managers_approval_request_task(quote_id):
+    from .emails import notify_managers_approval_request
+    from .models import Quote
+
+    return notify_managers_approval_request(Quote.objects.get(pk=quote_id))
+
+
+@_task
+def notify_staff_quote_approved_task(quote_id, preparer_id, sent_to_customer=False):
+    from django.contrib.auth import get_user_model
+
+    from .emails import notify_staff_quote_approved
+    from .models import Quote
+
+    preparer = get_user_model().objects.filter(pk=preparer_id).first() if preparer_id else None
+    return notify_staff_quote_approved(
+        Quote.objects.select_related('approved_by').get(pk=quote_id), preparer, sent_to_customer
+    )
+
+
+@_task
 def build_quote_pdf_task(quote_id):
     from .models import Quote
     from .pdf import attach_pdf_to_quote

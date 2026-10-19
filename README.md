@@ -47,7 +47,7 @@ photography — it is not broken, it just has not been built yet.
 | --- | --- |
 | `migrate` | The database schema |
 | `seed_ratecard` | 10 service categories, 28 pricing rules, the urgent fee band, email templates |
-| `bootstrap_groups` | The Customer / Staff / Owner role groups |
+| `bootstrap_groups` | The Customer / Staff / Manager / Owner role groups |
 | `build_logo_assets` | `static/img/` logo variants and favicon, from `assets/` |
 | `import_ratecard_images` | The 32 product photos into `media/`, from `assets/rate-card.pdf` |
 
@@ -368,12 +368,21 @@ unchanged — this layer supplements them.
 | Group | Access |
 | --- | --- |
 | `Customer` | Quote builder, own quote history only |
-| `Staff` | Quote review, register, dashboard. No user management |
-| `Owner` | Everything, including pricing and email template management |
+| `Staff` | Write and edit quotes, preview their PDFs, register, dashboard. Cannot approve, send or download quotes |
+| `Manager` | Everything Staff can do, plus approve & send quotes and download their PDFs |
+| `Owner` | Everything, including pricing and email template management. Counts as a manager |
 
 Run `manage.py bootstrap_groups` to create them. Staff views gate on
-`is_staff`, so superusers always get through; add owners to the `Owner` group
-**and** tick `is_staff` so they can reach the portal.
+`is_staff`, so superusers always get through; add managers and owners to their
+group **and** tick `is_staff` so they can reach the portal.
+
+**Quote approval.** Every quote staff write, pick up from a customer or
+reopen lands in review. Managers (Manager and Owner group members and
+superusers, by their account email) are emailed, and Slack is pinged if set,
+each time a quote goes into review, and the staff nav shows them a "N awaiting
+your approval" badge. When a manager approves, the staff member who put the
+quote up for review is emailed. With no manager email on file, approval alerts
+go to `STAFF_NOTIFY_EMAILS` instead.
 
 ---
 

@@ -9,6 +9,13 @@
       <a href="{{ u_dash }}" class="rounded-full px-4 py-1.5 text-sm font-semibold transition {% if request.path == u_dash %}bg-ink-yellow text-black{% else %}text-white/60 hover:bg-white/10 hover:text-white{% endif %}">Dashboard</a>
       <a href="{{ u_inbox }}" class="rounded-full px-4 py-1.5 text-sm font-semibold transition {% if '/staff/quotes' in request.path %}bg-ink-yellow text-black{% else %}text-white/60 hover:bg-white/10 hover:text-white{% endif %}">Quotes</a>
       <a href="{{ u_reg }}" class="rounded-full px-4 py-1.5 text-sm font-semibold transition {% if '/staff/register' in request.path %}bg-ink-yellow text-black{% else %}text-white/60 hover:bg-white/10 hover:text-white{% endif %}">Register</a>
+      {% if pending_approvals %}
+      <a href="{{ u_inbox }}" data-approval-alert
+         class="ml-2 inline-flex items-center gap-2 rounded-full bg-ink-magenta/20 px-4 py-1.5 text-sm font-bold text-ink-magenta transition hover:bg-ink-magenta/30">
+        <span class="h-2 w-2 animate-pulse rounded-full bg-ink-magenta"></span>
+        {{ pending_approvals }} awaiting your approval
+      </a>
+      {% endif %}
       <a href="/admin/" class="ml-auto rounded-full px-4 py-1.5 text-sm font-semibold text-white/40 transition hover:text-white">Django admin ↗</a>
     </div>
   </div>

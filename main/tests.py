@@ -10,7 +10,7 @@ import re
 from decimal import Decimal
 from unittest import mock
 
-from django.contrib.auth.models import AnonymousUser, User
+from django.contrib.auth.models import AnonymousUser, Group, User
 from django.core import mail
 from django.db.models import Sum
 from django.test import RequestFactory, TestCase, override_settings
@@ -31,6 +31,13 @@ from main.models import (
     ServiceCategory,
     UrgentFee,
 )
+from main.permissions import MANAGER_GROUP
+
+
+def make_manager(user):
+    """Put *user* in the Manager group, which may approve and download quotes."""
+    user.groups.add(Group.objects.get_or_create(name=MANAGER_GROUP)[0])
+    return user
 
 
 class PricingArithmeticTests(TestCase):
@@ -352,7 +359,9 @@ class QuoteWizardFlowTests(TestCase):
             category=self.category, name='2m x 1m', base_price=Decimal('280')
         )
         UrgentFee.objects.create(min_amount=Decimal('50'), max_amount=Decimal('100'))
-        self.staff = User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
+        self.staff = make_manager(
+            User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
+        )
 
     def test_guest_can_build_and_submit_a_quote(self):
         add = self.client.post(
@@ -503,7 +512,12 @@ class NewQuoteAlertTests(TestCase):
         self.category = ServiceCategory.objects.create(name='Banners', slug='banners')
 
     def alerts(self):
-        return [m for m in mail.outbox if m.to == ['inkpro@ahliki.com']]
+        # Only new-request alerts: with no managers set up, approval alerts
+        # fall back to the same office inbox (see ApprovalWorkflowTests).
+        return [
+            m for m in mail.outbox
+            if m.to == ['inkpro@ahliki.com'] and m.subject.startswith('New quote request')
+        ]
 
     def test_a_quote_created_in_admin_alerts_staff_with_its_lines(self):
         admin = User.objects.create_superuser('boss', 'boss@example.com', 'pw')
@@ -570,9 +584,9 @@ class StaffQuoteBoardTests(TestCase):
 
     def setUp(self):
         category = ServiceCategory.objects.create(name='Banners', slug='banners')
-        self.staff = User.objects.create_user(
+        self.staff = make_manager(User.objects.create_user(
             'charlie', 'charlie@example.com', 'pw', is_staff=True, first_name='Charlie', last_name='N'
-        )
+        ))
         self.quote = Quote.objects.create(
             guest_name='Ada', guest_email='ada@example.com', status=Quote.SUBMITTED
         )
@@ -638,7 +652,9 @@ class QuoteResponseAndRevisionTests(TestCase):
         self.rule = PricingRule.objects.create(
             category=self.category, name='2m x 1m', base_price=Decimal('280')
         )
-        self.staff = User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
+        self.staff = make_manager(
+            User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
+        )
         self.quote = Quote.objects.create(
             guest_name='Ada', guest_email='ada@example.com', status=Quote.SUBMITTED
         )
@@ -2198,9 +2214,9 @@ class QuoteDocumentTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response['Content-Disposition'].startswith('inline;'))
 
-    def test_staff_can_download_a_real_pdf(self):
-        staff = User.objects.create_user('staffer', 'staff@example.com', 'pw', is_staff=True)
-        self.client.force_login(staff)
+    def test_a_manager_can_download_a_real_pdf(self):
+        manager = make_manager(User.objects.create_user('boss', 'boss@example.com', 'pw', is_staff=True))
+        self.client.force_login(manager)
         response = self.client.get(reverse('staff_quote_pdf', args=[self.quote.pk]), {'download': 1})
         self.assertEqual(response['Content-Type'], 'application/pdf')
         self.assertTrue(response.content.startswith(b'%PDF'))
@@ -3301,3 +3317,189 @@ class QuickQuoteTests(TestCase):
         quote.recalculate()
         self.assertEqual(quote.total, Decimal('230.00'))
         self.assertEqual(quote.subtotal, Decimal('200.00'))
+
+
+@override_settings(STAFF_NOTIFY_EMAILS=['office@example.com'])
+class ApprovalWorkflowTests(TestCase):
+    """Staff write quotes; only a manager approves, sends or downloads them."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            'sam', 'sam@example.com', 'pw', is_staff=True, first_name='Sam', last_name='Staff'
+        )
+        self.manager = make_manager(User.objects.create_user(
+            'meg', 'meg@example.com', 'pw', is_staff=True, first_name='Meg', last_name='Manager'
+        ))
+
+    def create_quote(self, user):
+        self.client.force_login(user)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse('staff_quote_new'), {
+                'mode': 'quick', 'guest_name': 'Walk-in Client', 'guest_email': 'client@example.com',
+                'urgent_fee': '0', 'discount': '0',
+                'lines-TOTAL_FORMS': '1', 'lines-INITIAL_FORMS': '0',
+                'lines-MIN_NUM_FORMS': '1', 'lines-MAX_NUM_FORMS': '1000',
+                'lines-0-description': 'Banner', 'lines-0-quantity': '1',
+                'lines-0-total_inc_gst': '115.00',
+            }, follow=True)
+        return Quote.objects.latest('pk'), response
+
+    def mail_to(self, address):
+        return [m for m in mail.outbox if address in m.to]
+
+    def approve_and_send(self, quote, user):
+        self.client.force_login(user)
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client.post(
+                reverse('staff_quote_transition', args=[quote.pk]),
+                {'status': 'APPROVE_AND_SEND'}, follow=True,
+            )
+
+    def test_a_staff_quote_waits_in_review_and_alerts_the_managers(self):
+        quote, response = self.create_quote(self.staff)
+        self.assertEqual(quote.status, Quote.IN_REVIEW)
+        self.assertContains(response, 'sent to a manager for approval')
+        self.assertContains(response, 'Waiting for manager approval')
+
+        [alert] = self.mail_to('meg@example.com')
+        self.assertIn('Approval needed', alert.subject)
+        self.assertIn(quote.quote_number, alert.subject)
+        html = alert.alternatives[0][0]
+        self.assertIn('Sam Staff', html)
+        self.assertIn(reverse('staff_quote_detail', args=[quote.pk]), html)
+        # Not a request from outside, so the office new-request alert stays quiet,
+        # and nothing reaches the customer before approval.
+        self.assertEqual(self.mail_to('office@example.com'), [])
+        self.assertEqual(self.mail_to('client@example.com'), [])
+        self.assertEqual(self.mail_to('sam@example.com'), [])
+
+    def test_staff_cannot_approve_or_send(self):
+        quote, _ = self.create_quote(self.staff)
+        mail.outbox.clear()
+        for target in ('APPROVE_AND_SEND', Quote.APPROVED, Quote.SENT):
+            with self.subTest(target=target):
+                response = self.client.post(
+                    reverse('staff_quote_transition', args=[quote.pk]), {'status': target}, follow=True
+                )
+                quote.refresh_from_db()
+                self.assertEqual(quote.status, Quote.IN_REVIEW)
+                self.assertContains(response, 'Only a manager can approve')
+        self.assertEqual(mail.outbox, [])
+
+    def test_staff_see_no_approve_button_or_download_link(self):
+        quote, _ = self.create_quote(self.staff)
+        page = self.client.get(reverse('staff_quote_detail', args=[quote.pk]))
+        self.assertNotContains(page, 'APPROVE_AND_SEND')
+        self.assertNotContains(page, '?download=1')
+        self.assertContains(page, 'Manager approval required')
+        moves = [value for value, _ in page.context['allowed_transitions']]
+        self.assertNotIn(Quote.APPROVED, moves)
+
+        self.client.force_login(self.manager)
+        page = self.client.get(reverse('staff_quote_detail', args=[quote.pk]))
+        self.assertContains(page, 'APPROVE_AND_SEND')
+        self.assertContains(page, '?download=1')
+        self.assertContains(page, 'Waiting for your approval')
+
+    def test_staff_can_preview_but_not_download_the_pdf(self):
+        quote, _ = self.create_quote(self.staff)
+        url = reverse('staff_quote_pdf', args=[quote.pk])
+        preview = self.client.get(url)
+        self.assertEqual(preview.status_code, 200)
+        self.assertTrue(preview['Content-Disposition'].startswith('inline;'))
+        self.assertEqual(self.client.get(url, {'download': 1}).status_code, 403)
+
+        self.client.force_login(self.manager)
+        download = self.client.get(url, {'download': 1})
+        self.assertTrue(download['Content-Disposition'].startswith('attachment;'))
+
+    def test_approving_sends_the_quote_and_tells_whoever_prepared_it(self):
+        quote, _ = self.create_quote(self.staff)
+        mail.outbox.clear()
+        response = self.approve_and_send(quote, self.manager)
+        quote.refresh_from_db()
+        self.assertEqual(quote.status, Quote.SENT)
+        self.assertEqual(quote.approved_by, self.manager)
+        self.assertContains(response, 'sent to client@example.com')
+
+        self.assertEqual(len(self.mail_to('client@example.com')), 1)
+        [notice] = self.mail_to('sam@example.com')
+        self.assertIn('Approved', notice.subject)
+        self.assertIn('Meg Manager', notice.alternatives[0][0])
+        self.assertIn('emailed to client@example.com', notice.alternatives[0][0])
+
+    def test_approving_without_sending_also_tells_the_preparer(self):
+        quote, _ = self.create_quote(self.staff)
+        mail.outbox.clear()
+        self.client.force_login(self.manager)
+        self.client.post(reverse('staff_quote_transition', args=[quote.pk]), {'status': Quote.APPROVED})
+        quote.refresh_from_db()
+        self.assertEqual(quote.status, Quote.APPROVED)
+        [notice] = self.mail_to('sam@example.com')
+        self.assertIn("hasn't been sent", notice.alternatives[0][0])
+        self.assertEqual(self.mail_to('client@example.com'), [])
+
+    def test_a_staff_edit_after_approval_goes_back_for_approval(self):
+        quote, _ = self.create_quote(self.staff)
+        self.client.force_login(self.manager)
+        self.client.post(reverse('staff_quote_transition', args=[quote.pk]), {'status': Quote.APPROVED})
+        mail.outbox.clear()
+
+        self.client.force_login(self.staff)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse('staff_quote_add_item', args=[quote.pk]), {
+                'category': ServiceCategory.objects.create(name='Banners', slug='banners').pk,
+                'description': 'Rush fee', 'size': '', 'quantity': '1', 'unit_price': '20',
+            })
+        quote.refresh_from_db()
+        self.assertEqual(quote.status, Quote.IN_REVIEW)
+        self.assertEqual(len(self.mail_to('meg@example.com')), 1)
+
+    def test_a_manager_is_not_alerted_about_their_own_quote(self):
+        other = make_manager(User.objects.create_user('max', 'max@example.com', 'pw', is_staff=True))
+        quote, response = self.create_quote(self.manager)
+        self.assertEqual(quote.status, Quote.IN_REVIEW)
+        self.assertContains(response, 'Preview the PDF, then approve and send')
+        self.assertEqual(self.mail_to('meg@example.com'), [])
+        self.assertEqual(len(self.mail_to(other.email)), 1)
+
+        mail.outbox.clear()
+        self.approve_and_send(quote, self.manager)
+        # Nobody else prepared it, so there is no one to tell it was approved.
+        self.assertEqual([m.to for m in mail.outbox], [['client@example.com']])
+
+    def test_with_no_managers_set_up_the_alert_goes_to_the_office(self):
+        self.manager.groups.clear()
+        self.create_quote(self.staff)
+        [alert] = self.mail_to('office@example.com')
+        self.assertIn('Approval needed', alert.subject)
+
+    def test_a_customer_request_alerts_managers_when_staff_pick_it_up(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            quote = Quote.objects.create(guest_name='Ada', status=Quote.SUBMITTED)
+        self.assertEqual(self.mail_to('meg@example.com'), [])  # office hears first
+        with self.captureOnCommitCallbacks(execute=True):
+            quote.transition_to(Quote.IN_REVIEW, user=self.staff)
+            quote.save()  # further edits in review do not alert again
+        self.assertEqual(len(self.mail_to('meg@example.com')), 1)
+
+    def test_managers_see_how_many_quotes_await_approval(self):
+        self.create_quote(self.staff)
+        self.create_quote(self.staff)
+        self.client.force_login(self.manager)
+        page = self.client.get(reverse('staff_dashboard'))
+        self.assertContains(page, '2 awaiting your approval')
+
+        self.client.force_login(self.staff)
+        self.assertNotContains(self.client.get(reverse('staff_dashboard')), 'awaiting your approval')
+
+    def test_owners_and_superusers_count_as_managers(self):
+        from main.permissions import OWNER_GROUP, is_manager
+
+        owner = User.objects.create_user('olly', 'o@example.com', 'pw', is_staff=True)
+        owner.groups.add(Group.objects.create(name=OWNER_GROUP))
+        root = User.objects.create_superuser('root', 'r@example.com', 'pw')
+        self.assertTrue(is_manager(owner))
+        self.assertTrue(is_manager(root))
+        self.assertTrue(is_manager(self.manager))
+        self.assertFalse(is_manager(self.staff))

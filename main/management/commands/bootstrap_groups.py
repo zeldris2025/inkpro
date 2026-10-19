@@ -1,9 +1,9 @@
-"""Create the Customer / Staff / Owner groups and attach their permissions."""
+"""Create the Customer / Staff / Manager / Owner groups and attach their permissions."""
 
 from django.contrib.auth.models import Group, Permission
 from django.core.management.base import BaseCommand
 
-from main.permissions import GROUP_PERMISSIONS, OWNER_GROUP
+from main.permissions import GROUP_PERMISSIONS, MANAGER_GROUP, OWNER_GROUP
 
 
 class Command(BaseCommand):
@@ -26,7 +26,7 @@ class Command(BaseCommand):
             )
         self.stdout.write(
             self.style.SUCCESS(
-                f'Role groups ready. Add owners to "{OWNER_GROUP}" and tick is_staff '
-                'so they can reach the staff portal.'
+                f'Role groups ready. Add quote approvers to "{MANAGER_GROUP}", owners to '
+                f'"{OWNER_GROUP}", and tick is_staff so they can reach the staff portal.'
             )
         )

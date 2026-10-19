@@ -3,7 +3,7 @@
 {% block staff_content %}
 <a href="{% url 'staff_quote_inbox' %}" class="text-sm font-semibold text-white/50 transition hover:text-ink-yellow">← Quote inbox</a>
 <h1 class="mt-5 font-display text-3xl">New quote</h1>
-<p class="mt-1 text-sm text-white/45">Write a quote by hand. It's saved to review, where you can preview the PDF and approve &amp; send it.</p>
+<p class="mt-1 text-sm text-white/45">Write a quote by hand. It's saved to review, where you can preview the PDF{% if is_quote_manager %} and approve &amp; send it{% else %}. A manager is alerted to approve it before it goes to the customer{% endif %}.</p>
 
 <style>
   #manual-quote[data-mode="quick"] [data-only="detailed"],
@@ -90,8 +90,13 @@
         </div>
         <p class="hidden text-xs font-bold text-green-400" data-total="saving"></p>
       </dl>
+      {% if is_quote_manager %}
       <button type="submit" class="ink-btn mt-6 w-full justify-center py-3.5 text-base">Create quote</button>
       <p class="mt-3 text-xs text-white/40">Nothing is emailed yet — you'll review it first.</p>
+      {% else %}
+      <button type="submit" class="ink-btn mt-6 w-full justify-center py-3.5 text-base">Submit for approval</button>
+      <p class="mt-3 text-xs text-white/40">Nothing goes to the customer yet — a manager approves and sends it.</p>
+      {% endif %}
     </div>
   </div>
 </form>

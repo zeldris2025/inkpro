@@ -47,6 +47,17 @@ DEFAULT_COPY = {
         'intro': 'A new quote request came in from {name}.',
         'outro': '',
     },
+    EmailTemplate.MANAGER_APPROVAL_REQUEST: {
+        'subject': 'Approval needed: quote {quote_number}',
+        'intro': '{preparer} has put quote {quote_number} for {name} up for review. '
+                 'It needs a manager’s approval before it can go to the customer.',
+        'outro': '',
+    },
+    EmailTemplate.STAFF_QUOTE_APPROVED: {
+        'subject': 'Approved: quote {quote_number}',
+        'intro': '{approver} approved quote {quote_number} for {name}.',
+        'outro': '',
+    },
     EmailTemplate.STAFF_OVERDUE_DIGEST: {
         'subject': '{count} overdue invoice(s) — ${total} outstanding',
         'intro': 'Here’s today’s summary of unpaid invoices more than 30 days old.',
@@ -203,6 +214,59 @@ def notify_staff_quote_response(quote):
         else f'Quote {quote.quote_number} was declined.\n{staff_url}'
     )
     return sent
+
+
+def _person(user, fallback):
+    if user is None:
+        return fallback
+    return user.get_full_name() or user.get_username()
+
+
+def notify_managers_approval_request(quote):
+    """Tell every manager a quote is waiting for their approval, by email and Slack.
+
+    Whoever put the quote into review is left off, so a manager writing their
+    own quote is not alerted about it. With no manager email on file the alert
+    falls back to the office inbox rather than going nowhere.
+    """
+    from .permissions import manager_emails
+
+    preparer = quote.reviewed_by
+    staff_url = f"{settings.SITE_URL}{reverse('staff_quote_detail', args=[quote.pk])}"
+    recipients = manager_emails(exclude=preparer)
+    if not recipients and not manager_emails():
+        recipients = list(settings.STAFF_NOTIFY_EMAILS)
+    sent = send_branded_email(
+        to=recipients,
+        key=EmailTemplate.MANAGER_APPROVAL_REQUEST,
+        template='main/email/manager_approval_request.html',
+        context={'quote': quote, 'staff_url': staff_url, 'preparer': preparer},
+        name=quote.contact_name or 'a guest',
+        quote_number=quote.quote_number,
+        preparer=_person(preparer, 'A staff member'),
+    )
+    post_to_slack(
+        f'*Approval needed* {quote.quote_number} for {quote.contact_name or "a guest"} — '
+        f'${quote.total:,.2f}, prepared by {_person(preparer, "staff")}\n{staff_url}'
+    )
+    return sent
+
+
+def notify_staff_quote_approved(quote, preparer, sent_to_customer):
+    """Tell the staff member who prepared a quote that a manager approved it."""
+    approver = quote.approved_by
+    if preparer is None or not preparer.email or preparer == approver:
+        return False
+    staff_url = f"{settings.SITE_URL}{reverse('staff_quote_detail', args=[quote.pk])}"
+    return send_branded_email(
+        to=preparer.email,
+        key=EmailTemplate.STAFF_QUOTE_APPROVED,
+        template='main/email/staff_quote_approved.html',
+        context={'quote': quote, 'staff_url': staff_url, 'sent_to_customer': sent_to_customer},
+        name=quote.contact_name or 'a guest',
+        quote_number=quote.quote_number,
+        approver=_person(approver, 'A manager'),
+    )
 
 
 def send_payment_reminder(invoice):

@@ -19,6 +19,9 @@ from .models import Quote
 #: filled in, or an abandoned one being tidied away.
 NOT_A_REQUEST = {Quote.DRAFT, Quote.EXPIRED}
 
+#: Statuses in which a quote is waiting for a manager to approve it.
+AWAITING_APPROVAL = {Quote.IN_REVIEW, Quote.REVISED}
+
 _state = threading.local()
 
 
@@ -33,13 +36,47 @@ def new_quote_alerts_suppressed():
         _state.suppressed = previous
 
 
+@contextmanager
+def new_request_alert_suppressed():
+    """For quotes staff write themselves: they are not a request from outside,
+    so only the approval alert should fire, not the new-request one."""
+    previous = getattr(_state, 'skip_new_request', False)
+    _state.skip_new_request = True
+    try:
+        yield
+    finally:
+        _state.skip_new_request = previous
+
+
 @receiver(post_save, sender=Quote)
-def alert_staff_to_new_quote(sender, instance, created, raw=False, **kwargs):
+def quote_alerts(sender, instance, created, raw=False, **kwargs):
     previous = instance._saved_status
     instance._saved_status = instance.status
 
     if raw or getattr(_state, 'suppressed', False):
         return
+    alert_managers_to_review(instance, previous)
+    if not getattr(_state, 'skip_new_request', False):
+        alert_staff_to_new_quote(instance, created, previous)
+
+
+def alert_managers_to_review(instance, previous):
+    """A quote has just gone into review: it now needs a manager to approve it.
+
+    Fires once per trip into review, whether a staff member wrote the quote,
+    picked up a customer's request or reopened a sent one; edits made while it
+    sits in review do not fire again.
+    """
+    if instance.status not in AWAITING_APPROVAL or previous in AWAITING_APPROVAL:
+        return
+
+    from .tasks import notify_managers_approval_request_task, run_task
+
+    pk = instance.pk
+    transaction.on_commit(lambda: run_task(notify_managers_approval_request_task, pk))
+
+
+def alert_staff_to_new_quote(instance, created, previous):
     if instance.status in NOT_A_REQUEST:
         return
     # Brand new and already a request (admin, scripts), or a draft that has

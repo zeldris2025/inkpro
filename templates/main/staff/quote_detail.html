@@ -24,10 +24,27 @@
   <div class="flex flex-wrap items-center gap-3">
     <span class="rounded-full bg-white/10 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">{{ quote.get_status_display }}</span>
     <a href="{% url 'staff_quote_pdf' quote.pk %}" target="_blank" class="ink-btn-ghost text-xs">Preview PDF</a>
-    <a href="{% url 'staff_quote_pdf' quote.pk %}?download=1" class="ink-btn text-xs">Download PDF</a>
+    {% if can_approve %}<a href="{% url 'staff_quote_pdf' quote.pk %}?download=1" class="ink-btn text-xs">Download PDF</a>{% endif %}
     <a href="{{ quote.public_url }}" target="_blank" class="ink-btn-ghost text-xs">Customer view</a>
   </div>
 </div>
+
+{% if quote.status in 'SUBMITTED IN_REVIEW REVISED' %}
+<div data-approval-banner class="mt-6 rounded-xl border border-ink-magenta/40 bg-ink-magenta/10 p-4 text-sm text-white/80">
+  {% if can_approve %}
+  <strong class="text-ink-magenta">Waiting for your approval.</strong>
+  {% if quote.reviewed_by and quote.reviewed_by != request.user %}{{ quote.reviewed_by.get_full_name|default:quote.reviewed_by.username }} put this quote up for review.{% endif %}
+  Check the PDF preview, then approve &amp; send it from the Workflow panel.
+  {% else %}
+  <strong class="text-ink-magenta">Waiting for manager approval.</strong>
+  A manager has been alerted. You can keep editing it; you'll get an email once it's approved and sent.
+  {% endif %}
+</div>
+{% elif quote.status == 'APPROVED' and not can_approve %}
+<div class="mt-6 rounded-xl border border-green-400/30 bg-green-500/10 p-4 text-sm text-green-100">
+  <strong>Approved</strong> by {{ quote.approved_by.get_full_name|default:quote.approved_by.username|default:"a manager" }}. Changing it now sends it back for approval.
+</div>
+{% endif %}
 
 {% if quote.status == 'ACCEPTED' %}
 <div class="mt-6 rounded-xl border border-green-400/30 bg-green-500/10 p-4 text-sm text-green-100">
@@ -143,7 +160,12 @@
 
     <div class="rounded-xl border border-ink-yellow/30 bg-ink-yellow/5 p-6">
       <h2 class="font-display text-lg">Workflow</h2>
-      {% if quote.status in 'SUBMITTED IN_REVIEW REVISED APPROVED' %}
+      {% if quote.status in 'SUBMITTED IN_REVIEW REVISED APPROVED' and not can_approve %}
+      <div class="mt-4 rounded-lg border border-white/10 bg-black/30 p-4 text-sm text-white/60">
+        <p class="font-bold text-white/80">🔒 Manager approval required</p>
+        <p class="mt-1 text-xs leading-relaxed">Only a manager can approve and send this quote, or download its PDF. Use Preview PDF to check it.</p>
+      </div>
+      {% elif quote.status in 'SUBMITTED IN_REVIEW REVISED APPROVED' %}
       <form method="post" action="{% url 'staff_quote_transition' quote.pk %}" class="mt-4">
         {% csrf_token %}
         <input type="hidden" name="status" value="APPROVE_AND_SEND">
@@ -155,6 +177,7 @@
       <p class="mt-3 text-xs leading-relaxed text-white/50">
         Generates the branded PDF, emails it to {{ quote.contact_email|default:"the customer" }} with one-click
         accept/decline links, and moves the quote to Sent.{% if quote.revision %} The email tells them this revision replaces the earlier one.{% endif %}
+        {% if quote.reviewed_by and quote.reviewed_by != request.user %}{{ quote.reviewed_by.get_full_name|default:quote.reviewed_by.username }} is emailed that it was approved.{% endif %}
       </p>
       {% endif %}
 

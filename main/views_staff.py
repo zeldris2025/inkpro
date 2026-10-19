@@ -5,6 +5,7 @@ import io
 from datetime import timedelta
 
 from django.contrib import messages
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
 from django.http import HttpResponse
@@ -22,9 +23,13 @@ from .forms import (
 )
 from .models import Invoice, InvalidTransition, Quote, QuoteItem, ServiceCategory
 from .pdf import attach_pdf_to_quote
-from .permissions import staff_required
-from .tasks import run_task, send_quote_to_customer_task
+from .permissions import is_manager, staff_required
+from .signals import new_request_alert_suppressed
+from .tasks import notify_staff_quote_approved_task, run_task, send_quote_to_customer_task
 from .views import create_invoice_for_quote
+
+#: Moves only a manager may make: approving a quote, and sending one out.
+MANAGER_ONLY = {Quote.APPROVED, Quote.SENT, 'APPROVE_AND_SEND'}
 
 #: Columns of the register, in the spreadsheet's own order.
 REGISTER_COLUMNS = [
@@ -156,9 +161,12 @@ def quote_detail(request, pk):
                 item.delete()
             quote.refresh_from_db()
             quote.recalculate()
-            if quote.status == Quote.SUBMITTED or reopening:
+            voids_approval = _voids_approval(request, quote)
+            if quote.status == Quote.SUBMITTED or reopening or voids_approval:
                 quote.transition_to(Quote.IN_REVIEW, user=request.user)
-            if reopening:
+            if voids_approval:
+                messages.success(request, 'Quote updated and sent back to a manager for approval.')
+            elif reopening:
                 messages.success(
                     request,
                     f'Saved as revision {quote.revision}. The customer’s link is paused '
@@ -169,6 +177,7 @@ def quote_detail(request, pk):
             return redirect('staff_quote_detail', pk=pk)
         messages.error(request, 'Please fix the highlighted fields.')
 
+    can_approve = is_manager(request.user)
     return render(
         request,
         'main/staff/quote_detail.html',
@@ -178,23 +187,35 @@ def quote_detail(request, pk):
             'formset': formset,
             'add_form': add_form,
             'items': item_queryset,
+            'can_approve': can_approve,
             # Templates cannot call can_transition_to() with an argument, so the
             # legal next steps are resolved here.
             'allowed_transitions': [
                 (value, label)
                 for value, label in Quote.STATUS_CHOICES
                 if value in Quote.ALLOWED_TRANSITIONS.get(quote.status, set())
+                and (can_approve or value not in MANAGER_ONLY)
             ],
         },
     )
+
+
+def _voids_approval(request, quote):
+    """A non-manager changing an approved (not yet sent) quote undoes the approval.
+
+    The manager signed off the old figures, so the changed quote goes back to
+    review for a fresh approval rather than going out on the old one.
+    """
+    return quote.status == Quote.APPROVED and not is_manager(request.user)
 
 
 @staff_required
 def quote_new(request):
     """Write a quote by hand — for jobs taken in person, by phone or by email.
 
-    The quote lands in review rather than going straight out, so staff get the
-    usual Preview PDF / Approve & send screen to check it first.
+    The quote lands in review rather than going straight out, and managers are
+    alerted that it is waiting for their approval. Only a manager can approve
+    and send it.
 
     ``mode=quick`` takes just a description, quantity and GST-inclusive total
     per line, for a fast price with no sizes or rates.
@@ -213,7 +234,10 @@ def quote_new(request):
                 quote = form.save(commit=False)
                 quote.status = Quote.SUBMITTED
                 quote.submitted_at = timezone.now()
-                quote.save()
+                # Staff wrote it, so it is not a new request to alert staff to;
+                # the move into review below alerts the managers instead.
+                with new_request_alert_suppressed():
+                    quote.save()
                 custom = None
                 for order, item in enumerate(formset.save(commit=False)):
                     if item.category_id is None:
@@ -225,9 +249,16 @@ def quote_new(request):
                     item.save()
                 quote.recalculate()
                 quote.transition_to(Quote.IN_REVIEW, user=request.user)
-            messages.success(
-                request, f'Quote {quote.quote_number} created. Preview the PDF, then approve and send.'
-            )
+            if is_manager(request.user):
+                messages.success(
+                    request, f'Quote {quote.quote_number} created. Preview the PDF, then approve and send.'
+                )
+            else:
+                messages.success(
+                    request,
+                    f'Quote {quote.quote_number} created and sent to a manager for approval. '
+                    'You’ll get an email once it’s approved.',
+                )
             return redirect('staff_quote_detail', pk=quote.pk)
         messages.error(request, 'Please fix the highlighted fields.')
 
@@ -259,7 +290,10 @@ def quote_add_item(request, pk):
         item.display_order = quote.items.count()
         item.save()
         quote.recalculate()
-        if quote.edit_reopens:
+        if _voids_approval(request, quote):
+            quote.transition_to(Quote.IN_REVIEW, user=request.user)
+            messages.success(request, 'Line added and the quote sent back to a manager for approval.')
+        elif quote.edit_reopens:
             quote.transition_to(Quote.IN_REVIEW, user=request.user)
             messages.success(
                 request, f'Line added — saved as revision {quote.revision}. Send it when ready.'
@@ -278,9 +312,14 @@ def quote_transition(request, pk):
     quote = get_object_or_404(Quote, pk=pk)
     target = request.POST.get('status')
 
+    if target in MANAGER_ONLY and not is_manager(request.user):
+        messages.error(request, 'Only a manager can approve or send a quote. It’s waiting for their approval.')
+        return redirect('staff_quote_detail', pk=pk)
+
     if target == 'APPROVE_AND_SEND':
         return _approve_and_send(request, quote)
 
+    preparer = quote.reviewed_by
     try:
         quote.transition_to(target, user=request.user)
     except InvalidTransition as exc:
@@ -289,7 +328,19 @@ def quote_transition(request, pk):
         messages.success(request, f'Moved to {quote.get_status_display()}.')
         if target == Quote.ACCEPTED:
             create_invoice_for_quote(quote)
+        if target == Quote.APPROVED:
+            _alert_preparer(quote, preparer, sent_to_customer=False)
     return redirect('staff_quote_detail', pk=pk)
+
+
+def _alert_preparer(quote, preparer, *, sent_to_customer):
+    """Email the staff member who put the quote up for review that it was approved."""
+    run_task(
+        notify_staff_quote_approved_task,
+        quote.pk,
+        preparer.pk if preparer else None,
+        sent_to_customer,
+    )
 
 
 def _approve_and_send(request, quote):
@@ -298,9 +349,12 @@ def _approve_and_send(request, quote):
         messages.error(request, 'This quote has no customer email address to send to.')
         return redirect('staff_quote_detail', pk=quote.pk)
 
+    # Approving stamps reviewed_by with the manager, so note who prepared it first.
+    preparer = quote.reviewed_by
+    was_approved = quote.status == Quote.APPROVED
     quote.recalculate()
     try:
-        if quote.status != Quote.APPROVED:
+        if not was_approved:
             quote.transition_to(Quote.APPROVED, user=request.user)
         quote.transition_to(Quote.SENT, user=request.user)
     except InvalidTransition as exc:
@@ -313,6 +367,8 @@ def _approve_and_send(request, quote):
         messages.warning(request, 'Quote sent, but the PDF could not be stored on the record.')
 
     run_task(send_quote_to_customer_task, quote.pk)
+    if not was_approved:
+        _alert_preparer(quote, preparer, sent_to_customer=True)
     label = f'Quote {quote.quote_number}'
     if quote.revision:
         label = f'Revision {quote.revision} of {quote.quote_number}'
@@ -349,9 +405,15 @@ def quote_delete(request, pk):
 
 @staff_required
 def quote_pdf(request, pk):
-    """Stream the quote document: inline to preview, or ``?download=1`` to save it."""
+    """Stream the quote document: inline to preview, or ``?download=1`` to save it.
+
+    Any staff member can preview; only a manager can download, so a quote
+    cannot leave the building as a file before a manager has approved it.
+    """
     from .pdf import render_quote_pdf
 
+    if request.GET.get('download') and not is_manager(request.user):
+        raise PermissionDenied('Only a manager can download quote PDFs.')
     quote = get_object_or_404(Quote, pk=pk)
     filename, content, mimetype = render_quote_pdf(quote, request=request)
     response = HttpResponse(content, content_type=mimetype)

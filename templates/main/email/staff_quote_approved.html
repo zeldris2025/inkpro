@@ -1,0 +1,22 @@
+{% extends "main/email/base_email.html" %}{% load humanize %}
+{% block email_body %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;margin:20px 0;">
+  <tr><td style="padding:18px 20px;font-size:14px;color:#3f3f46;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr><td style="padding:4px 0;">Reference</td><td align="right" style="font-weight:700;color:#18181b;">{{ quote.quote_number }}{% if quote.revision %} (rev {{ quote.revision }}){% endif %}</td></tr>
+      <tr><td style="padding:4px 0;">Decision</td><td align="right" style="font-weight:800;color:#16a34a;">✓ APPROVED</td></tr>
+      <tr><td style="padding:4px 0;">Client</td><td align="right" style="font-weight:700;color:#18181b;">{{ quote.contact_name|default:"Guest" }}</td></tr>
+      <tr><td style="padding:4px 0;">Total</td><td align="right" style="font-weight:700;color:#18181b;">${{ quote.total|floatformat:2|intcomma }}</td></tr>
+    </table>
+  </td></tr>
+</table>
+
+<p style="margin:0;font-size:14px;color:#52525b;">
+  {% if sent_to_customer %}It has been emailed to {{ quote.contact_email }} with accept and decline links.
+  {% else %}It hasn't been sent to the customer yet.{% endif %}
+</p>
+
+<p style="text-align:center;margin:24px 0 0;">
+  <a href="{{ staff_url }}" style="display:inline-block;background:#0A0A0A;color:#FFD200;font-weight:800;font-size:15px;text-decoration:none;padding:14px 32px;border-radius:999px;">Open in staff panel →</a>
+</p>
+{% endblock %}

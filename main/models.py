@@ -911,6 +911,8 @@ class EmailTemplate(models.Model):
     QUOTE_ACCEPTED = 'QUOTE_ACCEPTED'
     STAFF_NEW_QUOTE = 'STAFF_NEW_QUOTE'
     STAFF_QUOTE_RESPONSE = 'STAFF_QUOTE_RESPONSE'
+    MANAGER_APPROVAL_REQUEST = 'MANAGER_APPROVAL_REQUEST'
+    STAFF_QUOTE_APPROVED = 'STAFF_QUOTE_APPROVED'
     PAYMENT_REMINDER = 'PAYMENT_REMINDER'
     STAFF_OVERDUE_DIGEST = 'STAFF_OVERDUE_DIGEST'
     KEY_CHOICES = [
@@ -919,6 +921,8 @@ class EmailTemplate(models.Model):
         (QUOTE_ACCEPTED, 'Customer — final quote after accepting'),
         (STAFF_NEW_QUOTE, 'Staff — new quote request'),
         (STAFF_QUOTE_RESPONSE, 'Staff — customer accepted or declined'),
+        (MANAGER_APPROVAL_REQUEST, 'Manager — quote waiting for approval'),
+        (STAFF_QUOTE_APPROVED, 'Staff — your quote was approved'),
         (PAYMENT_REMINDER, 'Customer — payment reminder'),
         (STAFF_OVERDUE_DIGEST, 'Staff — daily overdue invoices summary'),
     ]
