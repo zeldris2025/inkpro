@@ -1,26 +1,158 @@
-{% extends "main/staff/base_staff.html" %}
-{% block staff_title %}{% if invoice %}Edit entry{% else %}New entry{% endif %}{% endblock %}
+{% extends "main/staff/base_staff.html" %}{% load humanize %}
+{% block staff_title %}{% if invoice %}{{ invoice.invoice_no|default:invoice.client }}{% else %}New entry{% endif %}{% endblock %}
 {% block staff_content %}
-<a href="{% url 'staff_register' %}" class="text-sm font-semibold text-white/50 transition hover:text-ink-yellow">← Register</a>
-<h1 class="mt-5 font-display text-3xl">{% if invoice %}Edit {{ invoice.invoice_no|default:"entry" }}{% else %}New register entry{% endif %}</h1>
+<a href="{{ back_url }}" class="text-sm font-semibold text-white/50 transition hover:text-ink-yellow">← Register</a>
 
-<form method="post" class="mt-7 max-w-3xl rounded-xl border border-white/10 bg-white p-7 text-zinc-900">
-  {% csrf_token %}
-  <div class="grid gap-5 sm:grid-cols-2">
-    {% for field in form %}
-    <div class="{% if field.name in 'job_details notes' %}sm:col-span-2{% endif %}">
-      <label for="{{ field.id_for_label }}" class="mb-1.5 block text-xs font-bold uppercase tracking-widest text-zinc-500">{{ field.label }}</label>
-      {{ field }}
-      {% if field.help_text %}<p class="mt-1 text-xs text-zinc-400">{{ field.help_text }}</p>{% endif %}
-      {% for error in field.errors %}<p class="mt-1 text-xs font-semibold text-red-600">{{ error }}</p>{% endfor %}
+<div class="mt-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-3xl">{% if invoice %}{{ invoice.client }}{% else %}New register entry{% endif %}</h1>
+    {% if invoice %}
+    <p class="mt-1 text-sm text-white/45">
+      {{ invoice.invoice_no|default:"No invoice no." }} · {{ invoice.date|date:"j M Y"|default:"undated" }}
+      {% if invoice.quote %}· from quote <a href="{% url 'staff_quote_detail' invoice.quote.pk %}" class="font-bold text-ink-yellow hover:underline">{{ invoice.quote.quote_number }}</a>{% endif %}
+    </p>
+    {% endif %}
+  </div>
+  {% if invoice %}
+  <span class="rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest
+    {% if invoice.payment_status == 'PAID' %}bg-green-500/20 text-green-300
+    {% elif invoice.payment_status == 'PARTIAL' %}bg-ink-yellow/20 text-ink-yellow
+    {% elif invoice.payment_status == 'TBC' %}bg-white/10 text-white/50
+    {% else %}bg-red-500/20 text-red-300{% endif %}">{{ invoice.get_payment_status_display }}{% if invoice.is_overdue %} · overdue {{ invoice.days_overdue }}d{% endif %}</span>
+  {% endif %}
+</div>
+
+{% if invoice %}
+<dl class="mt-6 grid gap-4 sm:grid-cols-3">
+  <div class="rounded-xl border border-white/10 bg-white/5 p-5">
+    <dt class="text-xs font-bold uppercase tracking-widest text-white/40">Invoiced</dt>
+    <dd class="mt-2 font-display text-2xl tabular">${{ invoice.invoice_amount|floatformat:2|intcomma }}</dd>
+  </div>
+  <div class="rounded-xl border border-green-400/20 bg-green-500/5 p-5">
+    <dt class="text-xs font-bold uppercase tracking-widest text-green-300/70">Received</dt>
+    <dd class="mt-2 font-display text-2xl text-green-300 tabular">${{ invoice.amount_received|floatformat:2|intcomma }}</dd>
+  </div>
+  <div class="rounded-xl border p-5 {% if invoice.balance > 0 %}border-ink-magenta/30 bg-ink-magenta/5{% else %}border-white/10 bg-white/5{% endif %}">
+    <dt class="text-xs font-bold uppercase tracking-widest {% if invoice.balance > 0 %}text-ink-magenta/80{% else %}text-white/40{% endif %}">Balance owing</dt>
+    <dd class="mt-2 font-display text-2xl tabular {% if invoice.balance > 0 %}text-ink-magenta{% else %}text-white/50{% endif %}">${{ invoice.balance|floatformat:2|intcomma }}</dd>
+  </div>
+</dl>
+{% endif %}
+
+<div class="mt-6 grid gap-6 lg:grid-cols-3">
+  <!-- The entry itself -->
+  <form method="post" class="rounded-xl border border-white/10 bg-white p-7 text-zinc-900 {% if invoice %}lg:col-span-2{% else %}lg:col-span-3 max-w-3xl{% endif %}">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ back_url }}">
+    <h2 class="font-display text-lg">{% if invoice %}Edit entry{% else %}Details{% endif %}</h2>
+    <div class="mt-5 grid gap-5 sm:grid-cols-2">
+      {% for field in form %}
+      <div class="{% if field.name in 'job_details notes' %}sm:col-span-2{% endif %}">
+        {% if field.name == 'status_is_manual' %}
+        <label class="flex items-center gap-2 text-sm font-semibold">{{ field }} {{ field.label }}</label>
+        {% else %}
+        <label for="{{ field.id_for_label }}" class="mb-1.5 block text-xs font-bold uppercase tracking-widest text-zinc-500">{{ field.label }}</label>
+        {{ field }}
+        {% endif %}
+        {% if field.help_text %}<p class="mt-1 text-xs text-zinc-400">{{ field.help_text }}</p>{% endif %}
+        {% for error in field.errors %}<p class="mt-1 text-xs font-semibold text-red-600">{{ error }}</p>{% endfor %}
+      </div>
+      {% endfor %}
     </div>
-    {% endfor %}
+    {% if form.non_field_errors %}<div class="mt-5 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">{{ form.non_field_errors }}</div>{% endif %}
+    <p class="mt-5 text-xs text-zinc-500">Balance and payment status are recalculated automatically unless you set the status by hand.{% if invoice %} To take a payment, use Record a payment instead of editing Amount received, so it's kept in the payment history.{% endif %}</p>
+    <div class="mt-6 flex gap-3">
+      <button type="submit" class="ink-btn">Save entry</button>
+      <a href="{{ back_url }}" class="ink-btn-ghost border-zinc-300 text-zinc-700 hover:text-zinc-900">Cancel</a>
+    </div>
+  </form>
+
+  {% if invoice %}
+  <div class="space-y-5">
+    <!-- Record a payment -->
+    <form method="post" action="{% url 'staff_invoice_add_payment' invoice.pk %}" id="record-payment"
+          class="rounded-xl border border-white/10 bg-white p-6 text-zinc-900">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ back_url }}">
+      <h2 class="font-display text-lg">Record a payment</h2>
+      {% if invoice.balance > 0 %}
+      <p class="mt-1 text-xs text-zinc-500">Adds to the amount received. ${{ invoice.balance|floatformat:2|intcomma }} is still owing.</p>
+      <div class="mt-4 space-y-4">
+        {% for field in payment_form %}
+        <div>
+          <label for="{{ field.id_for_label }}" class="mb-1.5 block text-xs font-bold uppercase tracking-widest text-zinc-500">{{ field.label }}</label>
+          {{ field }}
+          {% if field.name == 'amount' %}
+          <button type="button" data-pay-full="{{ invoice.balance|floatformat:2 }}" class="mt-1.5 text-xs font-bold text-sky-700 hover:underline">Pay full balance (${{ invoice.balance|floatformat:2|intcomma }})</button>
+          {% endif %}
+          {% for error in field.errors %}<p class="mt-1 text-xs font-semibold text-red-600">{{ error }}</p>{% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+      <button type="submit" class="ink-btn mt-5 w-full justify-center">+ Record payment</button>
+      {% else %}
+      <p class="mt-2 text-sm text-zinc-500">Nothing is owing on this entry.{% if invoice.invoice_amount <= 0 %} Set the invoice amount first.{% endif %}</p>
+      {% endif %}
+    </form>
+
+    <!-- History -->
+    <div class="rounded-xl border border-white/10 bg-white/5 p-6">
+      <h2 class="font-display text-lg">Payments</h2>
+      {% if payments %}
+      <ul class="mt-4 divide-y divide-white/10 text-sm">
+        {% for payment in payments %}
+        <li class="flex items-start justify-between gap-3 py-3" data-payment>
+          <div>
+            <div class="font-bold text-green-300 tabular">${{ payment.amount|floatformat:2|intcomma }}</div>
+            <div class="text-xs text-white/50">
+              {{ payment.date|date:"j M Y" }}{% if payment.method %} · {{ payment.get_method_display }}{% endif %}{% if payment.receipt_no %} · #{{ payment.receipt_no }}{% endif %}
+            </div>
+            {% if payment.note %}<div class="mt-0.5 text-xs text-white/40">{{ payment.note }}</div>{% endif %}
+            {% if payment.recorded_by %}<div class="mt-0.5 text-[11px] text-white/30">by {{ payment.recorded_by.get_full_name|default:payment.recorded_by.username }}</div>{% endif %}
+          </div>
+          <form method="post" action="{% url 'staff_invoice_remove_payment' invoice.pk payment.pk %}"
+                onsubmit="return confirm('Remove this ${{ payment.amount|floatformat:2 }} payment? It comes off the amount received.')">
+            {% csrf_token %}<input type="hidden" name="next" value="{{ back_url }}">
+            <button type="submit" class="text-xs font-bold text-white/30 transition hover:text-red-300" title="Remove this payment">✕</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="mt-3 text-sm text-white/40">No payments recorded here yet.{% if invoice.amount_received > 0 %} The ${{ invoice.amount_received|floatformat:2|intcomma }} received was entered directly in the register.{% endif %}</p>
+      {% endif %}
+    </div>
+
+    <!-- Reminder -->
+    {% if invoice.balance > 0 and invoice.payment_status != 'PAID' and invoice.payment_status != 'TBC' %}
+    <div class="rounded-xl border border-white/10 bg-white/5 p-6">
+      <h2 class="font-display text-lg">Payment reminder</h2>
+      {% if invoice.contact_email %}
+      <p class="mt-1 text-xs text-white/50">
+        Emails {{ invoice.contact_email }} about the ${{ invoice.balance|floatformat:2|intcomma }} owing.
+        {% if invoice.reminder_sent_at %}Last reminded {{ invoice.reminder_sent_at|date:"j M Y" }}.{% else %}Not reminded yet.{% endif %}
+      </p>
+      <form method="post" action="{% url 'staff_invoice_remind' invoice.pk %}" class="mt-4"
+            onsubmit="return confirm('Email a payment reminder for ${{ invoice.balance|floatformat:2 }} to {{ invoice.contact_email|escapejs }}?')">
+        {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button type="submit" class="ink-btn-ghost w-full justify-center text-sm">✉ Send reminder</button>
+      </form>
+      {% else %}
+      <p class="mt-1 text-xs text-white/50">Add a client email above to send reminders.</p>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
-  {% if form.non_field_errors %}<div class="mt-5 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">{{ form.non_field_errors }}</div>{% endif %}
-  <p class="mt-5 text-xs text-zinc-500">Balance and payment status are recalculated automatically unless you tick the manual override.</p>
-  <div class="mt-6 flex gap-3">
-    <button type="submit" class="ink-btn">Save entry</button>
-    <a href="{% url 'staff_register' %}" class="ink-btn-ghost border-zinc-300 text-zinc-700 hover:text-zinc-900">Cancel</a>
-  </div>
-</form>
+  {% endif %}
+</div>
+
+<script>
+  document.querySelectorAll('[data-pay-full]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var amount = document.querySelector('#record-payment [name="amount"]');
+      amount.value = button.dataset.payFull;
+      amount.focus();
+    });
+  });
+</script>
 {% endblock %}

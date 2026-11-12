@@ -460,10 +460,13 @@ class QuoteWizardFlowTests(TestCase):
             reverse('staff_quote_transition', args=[quote.pk]), {'status': 'APPROVE_AND_SEND'}
         )
         quote.refresh_from_db()
-        self.assertEqual(quote.status, Quote.SENT)
+        self.assertEqual(quote.status, Quote.ACCEPTED)
         self.assertTrue(quote.pdf_file)
         self.assertEqual(len(mail.outbox), 1)
-        self.assertIn(quote.access_token, mail.outbox[0].alternatives[0][0])
+        html = mail.outbox[0].alternatives[0][0]
+        self.assertIn(quote.access_token, html)
+        self.assertIn('This is your final quote', html)
+        self.assertNotIn('?action=accept', html)  # nothing left for the client to decide
         self.assertTrue(mail.outbox[0].attachments)
 
         # The customer's token link now works without logging in.
@@ -601,20 +604,44 @@ class StaffQuoteBoardTests(TestCase):
         response = self.client.get(reverse('staff_quote_inbox'))
         return {column['key']: column['quotes'] for column in response.context['board']}, response
 
-    def test_approve_and_send_lands_in_approved_with_the_approver_named(self):
+    def test_approving_lands_in_accepted_with_the_approver_named(self):
         self.client.post(
             reverse('staff_quote_transition', args=[self.quote.pk]), {'status': 'APPROVE_AND_SEND'}
         )
         self.quote.refresh_from_db()
-        self.assertEqual(self.quote.status, Quote.SENT)  # the customer's accept link needs SENT
+        self.assertEqual(self.quote.status, Quote.ACCEPTED)  # a manager's approval is the sign-off
         self.assertEqual(self.quote.approved_by, self.staff)
         self.assertIsNotNone(self.quote.approved_at)
 
         columns, response = self.board()
-        self.assertIn(self.quote, columns[Quote.APPROVED])
+        self.assertIn(self.quote, columns[Quote.ACCEPTED])
+        self.assertNotIn(Quote.APPROVED, columns)  # no separate Approved column
         self.assertNotIn(Quote.SENT, columns)
         self.assertContains(response, 'Approved by Charlie N')
-        self.assertContains(response, 'awaiting customer')
+
+    def test_approving_opens_an_unpaid_register_entry_counted_as_invoiced(self):
+        self.client.post(
+            reverse('staff_quote_transition', args=[self.quote.pk]), {'status': 'APPROVE_AND_SEND'}
+        )
+        self.quote.refresh_from_db()
+        invoice = Invoice.objects.get(quote=self.quote)
+        self.assertEqual(invoice.invoice_amount, self.quote.total)
+        self.assertEqual(invoice.amount_received, 0)  # approved is not paid
+        self.assertEqual(invoice.payment_status, Invoice.NOT_PAID)
+        self.assertEqual(invoice.date, timezone.localdate())
+
+        kpi = self.client.get(reverse('staff_dashboard')).context['kpi']
+        self.assertEqual(kpi['invoiced'], self.quote.total)
+        self.assertEqual(kpi['received'], 0)
+        self.assertEqual(kpi['outstanding'], self.quote.total)
+        self.assertContains(self.client.get(reverse('staff_register')), self.quote.contact_name)
+
+        # Approving again (e.g. after a re-review) does not open a second entry.
+        self.quote.transition_to(Quote.IN_REVIEW, user=self.staff)
+        self.client.post(
+            reverse('staff_quote_transition', args=[self.quote.pk]), {'status': 'APPROVE_AND_SEND'}
+        )
+        self.assertEqual(Invoice.objects.filter(quote=self.quote).count(), 1)
 
     def test_a_later_edit_does_not_change_who_approved_it(self):
         self.client.post(
@@ -641,9 +668,9 @@ class StaffQuoteBoardTests(TestCase):
         response = self.client.get(reverse('staff_quote_inbox'), params)
         return next(c for c in response.context['board'] if c['key'] == key), response
 
-    def test_in_review_and_approved_show_five_newest_first_with_pages(self):
+    def test_in_review_and_accepted_show_five_newest_first_with_pages(self):
         self.quote.delete()
-        for status in (Quote.IN_REVIEW, Quote.APPROVED):
+        for status in (Quote.IN_REVIEW, Quote.ACCEPTED):
             with self.subTest(status=status):
                 quotes = self.make_quotes(status, 7)
                 newest_first = list(reversed(quotes))
@@ -660,11 +687,11 @@ class StaffQuoteBoardTests(TestCase):
 
     def test_paging_one_column_keeps_the_other_on_its_page(self):
         self.make_quotes(Quote.IN_REVIEW, 6)
-        self.make_quotes(Quote.APPROVED, 6)
-        column, _ = self.column(Quote.IN_REVIEW, page_approved=2)
-        self.assertIn('page_approved=2', column['next_url'])
-        approved, _ = self.column(Quote.APPROVED, page_approved=2)
-        self.assertEqual(len(approved['quotes']), 1)
+        self.make_quotes(Quote.ACCEPTED, 6)
+        column, _ = self.column(Quote.IN_REVIEW, page_accepted=2)
+        self.assertIn('page_accepted=2', column['next_url'])
+        accepted, _ = self.column(Quote.ACCEPTED, page_accepted=2)
+        self.assertEqual(len(accepted['quotes']), 1)
 
     def test_other_columns_are_not_paged(self):
         self.make_quotes(Quote.SUBMITTED, 7)  # plus the one from setUp
@@ -809,15 +836,11 @@ class QuoteResponseAndRevisionTests(TestCase):
             reverse('staff_quote_transition', args=[self.quote.pk]), {'status': 'APPROVE_AND_SEND'}
         )
         self.quote.refresh_from_db()
-        self.assertEqual(self.quote.status, Quote.SENT)
-        self.assertIsNone(self.quote.responded_at)
+        self.assertEqual(self.quote.status, Quote.ACCEPTED)  # approval accepts the revision
         self.assertIn('revised quote', mail.outbox[0].alternatives[0][0])
 
-        # Accepting the revision updates the unpaid register entry in place.
-        self.client.logout()
-        self.respond('accept')
+        # Approving the revision updates the unpaid register entry in place.
         invoice = Invoice.objects.get(quote=self.quote)
-        self.quote.refresh_from_db()
         self.assertEqual(invoice.invoice_amount, self.quote.total)
         self.assertEqual(self.quote.total, Decimal('345.00'))
 
@@ -832,8 +855,6 @@ class QuoteResponseAndRevisionTests(TestCase):
         self.client.post(
             reverse('staff_quote_transition', args=[self.quote.pk]), {'status': 'APPROVE_AND_SEND'}
         )
-        self.client.logout()
-        self.respond('accept')
         invoice.refresh_from_db()
         self.assertEqual(invoice.invoice_amount, original)
         self.assertIn('check this entry', invoice.notes)
@@ -845,7 +866,7 @@ class QuoteResponseAndRevisionTests(TestCase):
             reverse('staff_quote_transition', args=[self.quote.pk]), {'status': 'APPROVE_AND_SEND'}
         )
         self.quote.refresh_from_db()
-        self.assertEqual(self.quote.status, Quote.SENT)
+        self.assertEqual(self.quote.status, Quote.ACCEPTED)
         self.assertEqual(self.quote.revision, 1)
         self.assertEqual(self.quote.decline_reason, '')
 
@@ -1052,6 +1073,94 @@ class RegisterViewTests(TestCase):
         response = self.client.get(reverse('staff_register'), {'q': 'Harbour'})
         self.assertContains(response, 'Harbour Cafe')
         self.assertNotContains(response, 'Someone Else')
+
+
+class RegisterEntryTests(TestCase):
+    """Clicking a register row opens the entry: edit it all, record payments."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user('s', 's@example.com', 'pw', is_staff=True)
+        self.client.force_login(self.staff)
+        self.invoice = Invoice.objects.create(
+            client_name='Harbour Cafe', job_details='Banner', invoice_amount=Decimal('322'),
+            invoice_no='INV-1002', date=timezone.localdate(),
+        )
+        self.url = reverse('staff_invoice_edit', args=[self.invoice.pk])
+
+    def pay(self, amount, **extra):
+        return self.client.post(
+            reverse('staff_invoice_add_payment', args=[self.invoice.pk]),
+            {'amount': amount, 'date': timezone.localdate().isoformat(), 'method': '',
+             'receipt_no': '', 'note': '', **extra},
+        )
+
+    def test_every_row_opens_its_entry(self):
+        response = self.client.get(reverse('staff_register'))
+        self.assertContains(response, f'data-entry-href="{self.url}"')
+
+    def test_the_entry_page_shows_the_money_and_the_payment_form(self):
+        response = self.client.get(self.url)
+        self.assertContains(response, 'Record a payment')
+        self.assertContains(response, 'Pay full balance ($322.00)')
+        self.assertEqual(response.context['payment_form'].initial['amount'], Decimal('322.00'))
+
+    def test_recording_payments_builds_up_the_received_total(self):
+        self.pay('100.00', method=Invoice.BANK_TRANSFER, receipt_no='R-1', note='Deposit')
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.amount_received, Decimal('100.00'))
+        self.assertEqual(self.invoice.balance, Decimal('222.00'))
+        self.assertEqual(self.invoice.payment_status, Invoice.PARTIAL)
+        self.assertEqual(self.invoice.payment_method, Invoice.BANK_TRANSFER)
+        self.assertEqual(self.invoice.receipt_no, 'R-1')
+
+        self.pay('222.00', method=Invoice.CARD)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.payment_status, Invoice.PAID)
+        self.assertEqual(self.invoice.balance, Decimal('0.00'))
+        self.assertEqual(self.invoice.payments.count(), 2)
+        self.assertEqual(self.invoice.payments.first().recorded_by, self.staff)
+
+        page = self.client.get(self.url)
+        self.assertContains(page, 'Deposit')
+        self.assertContains(page, 'Nothing is owing on this entry.')
+        kpi = self.client.get(reverse('staff_dashboard')).context['kpi']
+        self.assertEqual(kpi['received'], Decimal('322.00'))
+
+    def test_a_payment_cannot_be_more_than_is_owing(self):
+        response = self.pay('400.00')
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, 'more than the $322.00 still owing', status_code=400)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.amount_received, 0)
+        self.assertFalse(self.invoice.payments.exists())
+
+    def test_removing_a_payment_takes_it_back_off(self):
+        self.pay('322.00')
+        payment = self.invoice.payments.get()
+        self.client.post(reverse('staff_invoice_remove_payment', args=[self.invoice.pk, payment.pk]))
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.amount_received, 0)
+        self.assertEqual(self.invoice.payment_status, Invoice.NOT_PAID)
+        self.assertFalse(self.invoice.payments.exists())
+
+    def test_saving_the_entry_goes_back_to_the_register_view_it_came_from(self):
+        back = reverse('staff_register') + '?q=Harbour'
+        response = self.client.post(self.url, {
+            'next': back, 'date': self.invoice.date.isoformat(), 'customer': '',
+            'client_name': 'Harbour Cafe Ltd', 'job_details': 'Banner', 'qty': '1',
+            'invoice_no': 'INV-1002', 'invoice_amount': '322.00', 'receipt_no': '',
+            'amount_received': '0', 'payment_method': '', 'payment_status': Invoice.NOT_PAID,
+            'client_email': 'cafe@example.com', 'notes': '',
+        })
+        self.assertRedirects(response, back, fetch_redirect_response=False)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.client_name, 'Harbour Cafe Ltd')
+        self.assertEqual(self.invoice.client_email, 'cafe@example.com')
+
+    def test_it_never_redirects_off_site(self):
+        response = self.pay('10.00', next='https://evil.example/')
+        self.assertTrue(response['Location'].startswith(self.url))
+        self.assertNotIn('evil.example', response['Location'])
 
 
 #: Same shape and quirks as the real Recharge Register export — title and totals
@@ -3467,9 +3576,9 @@ class ApprovalWorkflowTests(TestCase):
         mail.outbox.clear()
         response = self.approve_and_send(quote, self.manager)
         quote.refresh_from_db()
-        self.assertEqual(quote.status, Quote.SENT)
+        self.assertEqual(quote.status, Quote.ACCEPTED)
         self.assertEqual(quote.approved_by, self.manager)
-        self.assertContains(response, 'sent to client@example.com')
+        self.assertContains(response, 'emailed to client@example.com')
 
         self.assertEqual(len(self.mail_to('client@example.com')), 1)
         [notice] = self.mail_to('sam@example.com')
@@ -3553,10 +3662,12 @@ class ApprovalWorkflowTests(TestCase):
 
         response = self.approve_and_send(quote, self.manager)
         quote.refresh_from_db()
-        self.assertEqual(quote.status, Quote.SENT)
+        self.assertEqual(quote.status, Quote.ACCEPTED)
         self.assertEqual(quote.approved_by, self.manager)
         self.assertTrue(quote.is_unsent)
-        self.assertContains(response, 'approved, but not emailed')
+        self.assertContains(response, 'approved and accepted, but not emailed')
+        # No email, but the job still lands in the register.
+        self.assertTrue(Invoice.objects.filter(quote=quote).exists())
         self.assertContains(response, 'data-unsent')
         # Only the preparer hears about it, and is told it was not sent.
         [notice] = mail.outbox
@@ -3585,7 +3696,7 @@ class ApprovalWorkflowTests(TestCase):
             'staff_notes': '', 'project_title': '', 'normal_rate': '',
         })
         quote.refresh_from_db()
-        self.assertEqual(quote.status, Quote.SENT)  # contact fix, not a revision
+        self.assertEqual(quote.status, Quote.ACCEPTED)  # contact fix, not a revision
         self.assertEqual(quote.revision, 0)
         self.assertEqual(quote.guest_email, 'late@example.com')
         page = self.client.get(reverse('staff_quote_detail', args=[quote.pk]))

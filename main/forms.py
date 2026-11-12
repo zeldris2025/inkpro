@@ -13,7 +13,7 @@ from django.contrib.auth.forms import (
 from django.contrib.auth.models import User
 
 from . import pricing
-from .models import Customer, Invoice, PricingRule, Quote, QuoteItem, ServiceCategory
+from .models import Customer, Invoice, Payment, PricingRule, Quote, QuoteItem, ServiceCategory
 
 INPUT = (
     'w-full rounded-lg border border-white/15 bg-black/40 px-4 py-3 text-white '
@@ -438,8 +438,13 @@ class InvoiceForm(forms.ModelForm):
             'payment_method',
             'payment_status',
             'status_is_manual',
+            'client_email',
             'notes',
         ]
+        labels = {
+            'client_email': 'Client email',
+            'status_is_manual': 'Set the payment status by hand',
+        }
         widgets = {
             'date': forms.DateInput(attrs={'type': 'date'}),
             'job_details': forms.Textarea(attrs={'rows': 2}),
@@ -456,6 +461,38 @@ class InvoiceForm(forms.ModelForm):
         if not cleaned.get('customer') and not (cleaned.get('client_name') or '').strip():
             self.add_error('client_name', 'Give either a customer record or a client name.')
         return cleaned
+
+
+class PaymentForm(forms.ModelForm):
+    """Record money received against one register entry."""
+
+    class Meta:
+        model = Payment
+        fields = ['amount', 'date', 'method', 'receipt_no', 'note']
+        labels = {'method': 'Payment method', 'receipt_no': 'Receipt no.'}
+        widgets = {
+            'amount': forms.NumberInput(attrs={'step': '0.01', 'min': '0.01'}),
+            'date': forms.DateInput(attrs={'type': 'date'}),
+            'note': forms.TextInput(attrs={'placeholder': 'Optional, e.g. deposit'}),
+        }
+
+    def __init__(self, *args, invoice=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.invoice = invoice
+        if invoice is not None and invoice.balance > 0 and not self.is_bound:
+            self.initial.setdefault('amount', invoice.balance)
+        style(self.fields, LIGHT_INPUT)
+
+    def clean_amount(self):
+        amount = self.cleaned_data['amount']
+        if amount <= 0:
+            raise forms.ValidationError('Enter an amount greater than zero.')
+        if self.invoice is not None and amount > max(self.invoice.balance, 0):
+            raise forms.ValidationError(
+                f'That is more than the ${self.invoice.balance:,.2f} still owing. '
+                'Raise the invoice amount first if the job grew.'
+            )
+        return amount
 
 
 class CustomerProfileForm(forms.ModelForm):

@@ -12,7 +12,8 @@
 </table>
 
 <p style="margin:0;font-size:14px;color:#52525b;">
-  {% if sent_to_customer %}It has been emailed to {{ quote.contact_email }} with accept and decline links.
+  {% if quote.status == 'ACCEPTED' %}It is now accepted and a register entry has been opened.{% endif %}
+  {% if sent_to_customer %}The final quote has been emailed to {{ quote.contact_email }}.
   {% else %}It hasn't been sent to the customer yet.{% endif %}
 </p>
 

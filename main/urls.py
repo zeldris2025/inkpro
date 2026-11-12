@@ -99,6 +99,12 @@ urlpatterns = [
     path('staff/register/new/', views_staff.invoice_edit, name='staff_invoice_new'),
     path('staff/register/<int:pk>/', views_staff.invoice_edit, name='staff_invoice_edit'),
     path('staff/register/<int:pk>/inline/', views_staff.invoice_inline_update, name='staff_invoice_inline'),
+    path('staff/register/<int:pk>/payments/', views_staff.invoice_add_payment, name='staff_invoice_add_payment'),
+    path(
+        'staff/register/<int:pk>/payments/<int:payment_pk>/remove/',
+        views_staff.invoice_remove_payment,
+        name='staff_invoice_remove_payment',
+    ),
     # API
     path('api/dashboard/stats/', api.dashboard_stats, name='api_dashboard_stats'),
     path('api/pricing/rule/', api.rule_price, name='api_rule_price'),

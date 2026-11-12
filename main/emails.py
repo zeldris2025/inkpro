@@ -28,7 +28,7 @@ DEFAULT_COPY = {
     },
     EmailTemplate.QUOTE_SENT: {
         'subject': 'Your InkPro quote {quote_number} is ready',
-        'intro': 'Hi {name}, your quote is ready to review.',
+        'intro': 'Hi {name}, here is your quote from InkPro.',
         'outro': 'Questions? Just reply to this email.',
     },
     EmailTemplate.QUOTE_ACCEPTED: {

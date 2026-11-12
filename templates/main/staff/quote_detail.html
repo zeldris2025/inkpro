@@ -49,8 +49,9 @@
 
 {% if quote.status == 'ACCEPTED' %}
 <div class="mt-6 rounded-xl border border-green-400/30 bg-green-500/10 p-4 text-sm text-green-100">
-  <strong>Accepted by the customer</strong>{% if quote.responded_at %} on {{ quote.responded_at|date:"j M Y" }}{% endif %}, and they've been sent the final quote.
-  Need to change something? Edit below and save — the quote reopens as revision {{ quote.revision|add:1 }}, and once you send it the customer will need to accept the new version.
+  <strong>Accepted</strong>{% if quote.responded_at %} on {{ quote.responded_at|date:"j M Y" }}{% endif %}{% if quote.approved_by %}, approved by {{ quote.approved_by.get_full_name|default:quote.approved_by.username }}{% endif %}.
+  {% if quote.is_unsent %}The final quote hasn't been emailed to the client yet.{% else %}The client has been sent the final quote.{% endif %}
+  Need to change something? Edit below and save. The quote reopens as revision {{ quote.revision|add:1 }} and goes back for a manager's approval.
 </div>
 {% elif quote.status == 'DECLINED' %}
 <div class="mt-6 rounded-xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-100">
@@ -185,17 +186,17 @@
         {% csrf_token %}
         <input type="hidden" name="status" value="APPROVE_AND_SEND">
         <button type="submit" class="ink-btn w-full justify-center py-3.5 text-base">
-          {% if quote.revision %}✓ Send revised quote{% else %}✓ Approve &amp; send{% endif %}
+          {% if quote.revision %}✓ Approve revised quote{% else %}✓ Approve &amp; send{% endif %}
         </button>
       </form>
       {% if not quote.contact_email %}
       <p class="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
-        <strong>No client email.</strong> It will be approved and marked sent, but not emailed, so it shows as <strong>Unsent</strong>. Share the PDF or customer link yourself, or add an email in the Client section first.
+        <strong>No client email.</strong> It will be approved and accepted, but not emailed, so it shows as <strong>Unsent</strong>. Share the PDF yourself, or add an email in the Client section first.
       </p>
       {% endif %}
       <p class="mt-3 text-xs leading-relaxed text-white/50">
-        Generates the branded PDF, emails it to {{ quote.contact_email|default:"the customer" }} with one-click
-        accept/decline links, and moves the quote to Sent.{% if quote.revision %} The email tells them this revision replaces the earlier one.{% endif %}
+        Approves the quote and moves it to Accepted, opens its register entry, and emails the final quote PDF
+        to {{ quote.contact_email|default:"the customer" }}.{% if quote.revision %} The email tells them this revision replaces the earlier one.{% endif %}
         {% if quote.reviewed_by and quote.reviewed_by != request.user %}{{ quote.reviewed_by.get_full_name|default:quote.reviewed_by.username }} is emailed that it was approved.{% endif %}
       </p>
       {% endif %}
@@ -204,7 +205,7 @@
       <div class="mt-4 rounded-lg border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-100">
         <p class="font-bold">Unsent</p>
         <p class="mt-1 text-xs leading-relaxed text-amber-100/80">
-          Approved and marked sent, but never emailed to the client.
+          Approved, but the final quote was never emailed to the client.
           {% if not quote.contact_email %}Add their email in the <a href="#client" class="font-bold underline">Client</a> section and save to email it, or share the PDF or customer link yourself.{% endif %}
         </p>
         {% if quote.contact_email and can_approve %}

@@ -660,9 +660,9 @@ class Quote(models.Model):
 
     @property
     def is_unsent(self):
-        """Approved and marked sent, but this version was never emailed out."""
+        """Approved, but this version was never emailed to the client."""
         return (
-            self.status == self.SENT
+            self.status in (self.SENT, self.ACCEPTED)
             and self.sent_at is not None
             and (self.emailed_at is None or self.emailed_at < self.sent_at)
         )
@@ -913,6 +913,60 @@ class Invoice(models.Model):
         if self.reminder_sent_at is None:
             return True
         return timezone.now() - self.reminder_sent_at >= timedelta(days=self.REMINDER_INTERVAL_DAYS)
+
+
+class Payment(models.Model):
+    """One payment recorded against a register entry.
+
+    ``Invoice.amount_received`` stays the figure the register, dashboard and
+    reminders read. Recording a payment adds to it and removing one takes it
+    back off, so these rows are the history behind that figure. Amounts typed
+    straight into the register's Received cell, or imported, have no row here.
+    """
+
+    invoice = models.ForeignKey(Invoice, related_name='payments', on_delete=models.CASCADE)
+    date = models.DateField(default=timezone.localdate)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    method = models.CharField(
+        max_length=30, choices=Invoice.PAYMENT_METHOD_CHOICES, blank=True, default=''
+    )
+    receipt_no = models.CharField(max_length=100, blank=True)
+    note = models.CharField(max_length=255, blank=True)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-date', '-pk']
+
+    def __str__(self):
+        return f'${self.amount} on {self.date} for {self.invoice}'
+
+    @transaction.atomic
+    def record(self):
+        """Save this payment and add it to the entry's received total."""
+        invoice = Invoice.objects.select_for_update().get(pk=self.invoice_id)
+        self.invoice = invoice
+        self.save()
+        invoice.amount_received = Decimal(str(invoice.amount_received or 0)) + self.amount
+        if self.method:
+            invoice.payment_method = self.method
+        if self.receipt_no:
+            invoice.receipt_no = self.receipt_no
+        invoice.save()
+        return invoice
+
+    @transaction.atomic
+    def remove(self):
+        """Delete this payment and take it back off the entry's received total."""
+        invoice = Invoice.objects.select_for_update().get(pk=self.invoice_id)
+        invoice.amount_received = max(
+            Decimal(str(invoice.amount_received or 0)) - self.amount, Decimal('0')
+        )
+        invoice.save()
+        self.delete()
+        return invoice
 
 
 class EmailTemplate(models.Model):

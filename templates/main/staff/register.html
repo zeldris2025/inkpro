@@ -108,4 +108,30 @@
   </table>
 </div>
 {% if count > 500 %}<p class="mt-4 text-center text-xs text-white/35">Showing the first 500 of {{ count|intcomma }} entries — narrow the filters to see more.</p>{% endif %}
+
+<script>
+(function () {
+  // Clicking a row opens the entry, and its page brings you back to this
+  // register view, filters and all. Clicks on the inline-editable cells,
+  // links and buttons keep doing their own job.
+  var INTERACTIVE = '[contenteditable], a, button, form, input, select, textarea, label';
+  function entryUrl(href) {
+    return href + '?next=' + encodeURIComponent(location.pathname + location.search);
+  }
+  var body = document.querySelector('tbody');
+  if (!body) return;
+  body.addEventListener('click', function (event) {
+    var link = event.target.closest('[data-entry-link]');
+    if (link && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      location.href = entryUrl(link.getAttribute('href'));
+      return;
+    }
+    if (event.target.closest(INTERACTIVE)) return;
+    if (window.getSelection && String(window.getSelection())) return;  // selecting text
+    var row = event.target.closest('[data-entry-href]');
+    if (row) location.href = entryUrl(row.dataset.entryHref);
+  });
+})();
+</script>
 {% endblock %}

@@ -3,6 +3,7 @@
 import csv
 import io
 from datetime import timedelta
+from urllib.parse import quote as quote_url
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
@@ -11,18 +12,21 @@ from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from .forms import (
     InvoiceForm,
+    PaymentForm,
     StaffManualLineFormSet,
     StaffManualQuoteForm,
     StaffQuoteForm,
     StaffQuoteItemAddForm,
     StaffQuoteItemFormSet,
 )
-from .models import Invoice, InvalidTransition, Quote, QuoteItem, ServiceCategory
+from .models import Invoice, InvalidTransition, Payment, Quote, QuoteItem, ServiceCategory
 from .pdf import attach_pdf_to_quote
 from .permissions import is_manager, staff_required
 from .signals import new_request_alert_suppressed
@@ -82,20 +86,19 @@ def dashboard(request):
 
 #: Kanban columns, left to right. Accepted and declined sit at the end so the
 #: team can see answers come in and reopen a quote for a revised send.
-#: "Approve & send" ends on SENT (the status the customer's accept link needs),
-#: so Approved and Sent share a column: an approved quote stays where staff
-#: expect it, with each card saying whether it has gone out yet.
+#: A manager's approval accepts the quote, so there is no separate Approved
+#: column. Quotes left Approved or Sent from before that (still waiting on a
+#: customer's answer) sit in Accepted, each card saying where it stands.
 BOARD_COLUMNS = [
     (Quote.SUBMITTED, 'Submitted', [Quote.SUBMITTED]),
     (Quote.IN_REVIEW, 'In review', [Quote.IN_REVIEW, Quote.REVISED]),
-    (Quote.APPROVED, 'Approved', [Quote.APPROVED, Quote.SENT]),
-    (Quote.ACCEPTED, 'Accepted', [Quote.ACCEPTED]),
+    (Quote.ACCEPTED, 'Accepted', [Quote.ACCEPTED, Quote.APPROVED, Quote.SENT]),
     (Quote.DECLINED, 'Declined', [Quote.DECLINED]),
 ]
 
 #: Board columns that page through their quotes, this many at a time. The
 #: rest show their latest quotes, capped at BOARD_COLUMN_CAP.
-PAGED_COLUMNS = {Quote.IN_REVIEW, Quote.APPROVED}
+PAGED_COLUMNS = {Quote.IN_REVIEW, Quote.ACCEPTED}
 BOARD_PAGE_SIZE = 5
 BOARD_COLUMN_CAP = 25
 
@@ -231,7 +234,8 @@ def quote_detail(request, pk):
                 (value, label)
                 for value, label in Quote.STATUS_CHOICES
                 if value in Quote.ALLOWED_TRANSITIONS.get(quote.status, set())
-                and (can_approve or value not in MANAGER_ONLY)
+                # Approving (which accepts) is the Approve & send button's job.
+                and value not in MANAGER_ONLY
             ],
         },
     )
@@ -383,11 +387,15 @@ def _alert_preparer(quote, preparer, *, sent_to_customer):
 
 
 def _approve_and_send(request, quote):
-    """Approve, render the branded PDF and email it with accept/decline links.
+    """Approve the quote, which accepts it: a manager's approval is the sign-off.
 
-    With no client email the quote is still approved and marked sent, so its
-    customer link and PDF can be shared by hand; it shows as Unsent until it
-    is emailed.
+    The quote passes through Approved and Sent (stamping who approved it, when
+    it went out and how long it is valid) and lands on Accepted, which opens
+    its register entry. The client is emailed the final quote PDF, with no
+    accept/decline buttons since there is nothing left for them to decide.
+
+    With no client email the quote is still approved and accepted, so its PDF
+    and customer link can be shared by hand; it shows as Unsent until emailed.
     """
     # Approving stamps reviewed_by with the manager, so note who prepared it first.
     preparer = quote.reviewed_by
@@ -397,14 +405,16 @@ def _approve_and_send(request, quote):
         if not was_approved:
             quote.transition_to(Quote.APPROVED, user=request.user)
         quote.transition_to(Quote.SENT, user=request.user)
+        quote.transition_to(Quote.ACCEPTED, user=request.user)
     except InvalidTransition as exc:
         messages.error(request, str(exc))
         return redirect('staff_quote_detail', pk=quote.pk)
 
+    create_invoice_for_quote(quote)
     try:
         attach_pdf_to_quote(quote, request=request)
     except Exception:
-        messages.warning(request, 'Quote sent, but the PDF could not be stored on the record.')
+        messages.warning(request, 'Quote accepted, but the PDF could not be stored on the record.')
 
     emailing = bool(quote.contact_email)
     if emailing:
@@ -415,20 +425,22 @@ def _approve_and_send(request, quote):
     if quote.revision:
         label = f'Revision {quote.revision} of {quote.quote_number}'
     if emailing:
-        messages.success(request, f'{label} sent to {quote.contact_email}.')
+        messages.success(
+            request, f'{label} approved and accepted. The final quote was emailed to {quote.contact_email}.'
+        )
     else:
         messages.warning(
             request,
-            f'{label} approved, but not emailed: there is no client email, so it shows as Unsent. '
-            'Share the PDF or customer link yourself, or add an email and use “Email quote”.',
+            f'{label} approved and accepted, but not emailed: there is no client email, so it shows '
+            'as Unsent. Share the PDF yourself, or add an email and use “Email quote”.',
         )
     return redirect('staff_quote_detail', pk=quote.pk)
 
 
 def _email_quote(request, quote):
-    """Email a quote that was approved and marked sent without an address."""
-    if quote.status != Quote.SENT:
-        messages.error(request, 'Only a sent quote can be emailed.')
+    """Email a quote that was approved without a client address on file."""
+    if quote.status not in (Quote.SENT, Quote.ACCEPTED):
+        messages.error(request, 'Only an approved quote can be emailed.')
     elif not quote.contact_email:
         messages.error(request, 'Add the client’s email first.')
     else:
@@ -606,17 +618,84 @@ def _export_csv(invoices):
     return response
 
 
+def _back_to_register(request):
+    """Where to go after working on an entry: the register page it was opened
+    from (keeping its filters and search), else the plain register."""
+    target = request.POST.get('next') or request.GET.get('next') or ''
+    if target and url_has_allowed_host_and_scheme(
+        target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return target
+    return reverse('staff_register')
+
+
 @staff_required
 def invoice_edit(request, pk=None):
-    invoice = get_object_or_404(Invoice, pk=pk) if pk else None
+    """One register entry: edit every field, record payments, see its history."""
+    invoice = get_object_or_404(
+        Invoice.objects.select_related('customer', 'quote'), pk=pk
+    ) if pk else None
     form = InvoiceForm(request.POST or None, instance=invoice)
     if request.method == 'POST' and form.is_valid():
         saved = form.save()
-        messages.success(request, f'Saved invoice {saved.invoice_no or saved.pk}.')
-        return redirect('staff_register')
+        messages.success(request, f'Saved {saved.invoice_no or "the entry for " + saved.client}.')
+        return redirect(_back_to_register(request))
     return render(
-        request, 'main/staff/invoice_form.html', {'form': form, 'invoice': invoice}
+        request,
+        'main/staff/invoice_form.html',
+        {
+            'form': form,
+            'invoice': invoice,
+            'payment_form': PaymentForm(invoice=invoice) if invoice else None,
+            'payments': invoice.payments.select_related('recorded_by') if invoice else [],
+            'back_url': _back_to_register(request),
+        },
     )
+
+
+@staff_required
+@require_POST
+def invoice_add_payment(request, pk):
+    """Record a payment against an entry; it adds to the amount received."""
+    invoice = get_object_or_404(Invoice, pk=pk)
+    form = PaymentForm(request.POST, invoice=invoice)
+    if form.is_valid():
+        payment = form.save(commit=False)
+        payment.invoice = invoice
+        payment.recorded_by = request.user
+        invoice = payment.record()
+        if invoice.balance <= 0:
+            messages.success(request, f'Payment of ${payment.amount:,.2f} recorded. The entry is paid in full.')
+        else:
+            messages.success(
+                request,
+                f'Payment of ${payment.amount:,.2f} recorded. ${invoice.balance:,.2f} still owing.',
+            )
+        return redirect(f"{reverse('staff_invoice_edit', args=[pk])}?next={quote_url(_back_to_register(request))}")
+
+    messages.error(request, 'The payment wasn’t recorded. Please fix the highlighted fields.')
+    return render(
+        request,
+        'main/staff/invoice_form.html',
+        {
+            'form': InvoiceForm(instance=invoice),
+            'invoice': invoice,
+            'payment_form': form,
+            'payments': invoice.payments.select_related('recorded_by'),
+            'back_url': _back_to_register(request),
+        },
+        status=400,
+    )
+
+
+@staff_required
+@require_POST
+def invoice_remove_payment(request, pk, payment_pk):
+    """Undo a payment recorded by mistake; its amount comes off the received total."""
+    payment = get_object_or_404(Payment, pk=payment_pk, invoice_id=pk)
+    payment.remove()
+    messages.success(request, f'Removed the ${payment.amount:,.2f} payment from {payment.date:%d %b %Y}.')
+    return redirect(f"{reverse('staff_invoice_edit', args=[pk])}?next={quote_url(_back_to_register(request))}")
 
 
 @staff_required
@@ -700,7 +779,7 @@ def invoice_send_reminder(request, pk):
             messages.success(
                 request, f'Reminder for ${invoice.balance:,.2f} sent to {invoice.contact_email}.'
             )
-    return redirect(request.POST.get('next') or 'staff_register')
+    return redirect(_back_to_register(request))
 
 
 @staff_required

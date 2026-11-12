@@ -4,7 +4,9 @@ One register row. The money/reference cells are contenteditable and post
 themselves back through HTMX on blur, which swaps this same partial back in
 with the recalculated balance and status.
 {% endcomment %}
-<tr id="invoice-row-{{ invoice.pk }}" class="transition hover:bg-white/5 {% if invoice.is_overdue %}bg-red-500/5{% endif %}">
+<tr id="invoice-row-{{ invoice.pk }}" data-entry-href="{% url 'staff_invoice_edit' invoice.pk %}"
+    title="Click to open this entry: edit it, record payments"
+    class="cursor-pointer transition hover:bg-white/5 {% if invoice.is_overdue %}bg-red-500/5{% endif %}">
   <td class="whitespace-nowrap px-3 py-2.5 text-white/60">{{ invoice.date|date:"j M y"|default:"—" }}</td>
   <td class="px-3 py-2.5">
     <div class="font-semibold">
@@ -83,7 +85,7 @@ with the recalculated balance and status.
         </button>
       </form>
       {% endif %}
-      <a href="{% url 'staff_invoice_edit' invoice.pk %}" class="text-xs font-bold text-ink-yellow hover:underline">Edit</a>
+      <a href="{% url 'staff_invoice_edit' invoice.pk %}" data-entry-link class="text-xs font-bold text-ink-yellow hover:underline">Open</a>
     </div>
   </td>
 </tr>
